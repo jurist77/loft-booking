@@ -1,9 +1,9 @@
-export type AppMode = "demo" | "production";
+import { appMode, type AppMode } from "./app-mode";
+export type { AppMode } from "./app-mode";
 export type DeploymentConfig = { mode: AppMode; basePath: string; apiBaseUrl: string };
 
 export function deploymentConfig(input: { mode?: string; basePath?: string; apiBaseUrl?: string }): DeploymentConfig {
-  const mode = input.mode || "demo";
-  if (mode !== "demo" && mode !== "production") throw new Error("Unknown application mode");
+  const mode = appMode(input.mode);
   const basePath = input.basePath || "";
   if (basePath && !/^\/[a-zA-Z0-9_-]+(?:\/[a-zA-Z0-9_-]+)*$/.test(basePath)) {
     throw new Error("Base path must be empty or an absolute path without a trailing slash");

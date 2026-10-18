@@ -11,7 +11,7 @@ describe("Deployment configuration", () => {
     expect(assetPath("/images/studio-1.svg", "/another/demo")).toBe("/another/demo/images/studio-1.svg");
   });
   it("prepares independent VPS/API configuration without implementing an API", () => {
-    expect(deploymentConfig({ mode: "production", apiBaseUrl: "/api" })).toEqual({ mode: "production", basePath: "", apiBaseUrl: "/api" });
+    expect(deploymentConfig({ mode: "server", apiBaseUrl: "/api" })).toEqual({ mode: "server", basePath: "", apiBaseUrl: "/api" });
     expect(deploymentConfig({ apiBaseUrl: "https://api.example.test/v1" }).apiBaseUrl).toBe("https://api.example.test/v1");
   });
   it.each(["/demo/", "demo", "//host", "/../demo", "/demo?secret=yes"])("rejects unsafe base path %s", (basePath) => {

@@ -3,9 +3,9 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
-    "dev": "next dev --hostname 0.0.0.0",
-    "build": "next build",
-    "start": "next start --hostname 0.0.0.0",
+    "dev": "node scripts/next-mode.mjs demo dev",
+    "build": "node scripts/next-mode.mjs demo build",
+    "start": "node scripts/next-mode.mjs demo start",
     "typecheck": "tsc --noEmit",
     "lint": "eslint .",
     "test": "vitest run",
@@ -15,20 +15,40 @@
     "build:demo": "node scripts/build-demo.mjs",
     "preview:demo": "node scripts/serve-demo.mjs",
     "audit:demo": "node scripts/audit-demo.mjs",
-    "verify:demo": "node scripts/verify-demo.mjs"
+    "verify:demo": "node scripts/verify-demo.mjs",
+    "dev:server": "node scripts/next-mode.mjs server dev",
+    "build:server": "node scripts/next-mode.mjs server build",
+    "start:server": "node scripts/next-mode.mjs server start",
+    "db:env": "node scripts/local-env.mjs",
+    "db:up": "node scripts/database-compose.mjs dev up",
+    "db:stop": "node scripts/database-compose.mjs dev stop",
+    "db:status": "node scripts/database-compose.mjs dev status",
+    "db:test:up": "node scripts/database-compose.mjs test up",
+    "db:test:stop": "node scripts/database-compose.mjs test stop",
+    "db:test:status": "node scripts/database-compose.mjs test status",
+    "db:check": "node --env-file-if-exists=.env.local --conditions=react-server scripts/database-check.mjs",
+    "db:migrate": "node --env-file-if-exists=.env.local --conditions=react-server scripts/migrate.mjs",
+    "db:test:migrate": "node --env-file-if-exists=.env.test.local --conditions=react-server scripts/migrate.mjs",
+    "db:test:check": "node --env-file-if-exists=.env.test.local --conditions=react-server scripts/database-check.mjs",
+    "test:integration": "node --env-file-if-exists=.env.test.local node_modules/vitest/vitest.mjs run --config vitest.integration.config.ts",
+    "test:server:http": "node scripts/verify-server.mjs",
+    "test:demo:isolation": "node scripts/verify-demo-isolation.mjs"
   },
   "engines": {
-    "node": "^22.12.0 || ^24.0.0 || >=26.0.0"
+    "node": "^24.0.0 || >=26.0.0"
   },
   "dependencies": {
     "next": "16.4.2",
+    "pg": "^8.23.1",
     "react": "19.3.1",
-    "react-dom": "19.3.1"
+    "react-dom": "19.3.1",
+    "server-only": "^0.0.1"
   },
   "devDependencies": {
     "@playwright/test": "^1.61.0",
     "@tailwindcss/postcss": "4.3.3",
     "@types/node": "^24",
+    "@types/pg": "^8.23.1",
     "@types/react": "^19",
     "@types/react-dom": "^19",
     "eslint": "9.39.5",
