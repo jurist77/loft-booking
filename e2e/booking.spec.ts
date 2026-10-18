@@ -1,5 +1,5 @@
 import { expect, test } from "@playwright/test";
-import { fillDemoContact, selectFutureDay, slotButton } from "./flows";
+import { fillDemoContact, openCalendar, selectFutureDay, slotButton } from "./flows";
 
 test("complete demo booking, gallery, time restrictions and reset", async ({ page }) => {
   const errors: string[] = [];
@@ -8,13 +8,15 @@ test("complete demo booking, gallery, time restrictions and reset", async ({ pag
   await page.goto("./");
   await expect(page.getByRole("heading", { level: 1 })).toContainText("Место для");
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+  await page.getByRole("button", { name: "О пространстве", exact: true }).click();
   await page.getByRole("button", { name: "Открыть изображение: Общее пространство", exact: true }).click();
-  await expect(page.getByRole("dialog")).toBeVisible();
+  await expect(page.locator(".photo-dialog")).toBeVisible();
   await page.getByRole("button", { name: "Следующее изображение" }).click();
-  await expect(page.getByRole("dialog")).toContainText("2/4");
+  await expect(page.locator(".photo-dialog")).toContainText("2/4");
   await page.keyboard.press("Escape");
-  await expect(page.getByRole("dialog")).not.toBeVisible();
-  await page.getByRole("link", { name: "Забронировать", exact: true }).click();
+  await expect(page.locator(".photo-dialog")).not.toBeVisible();
+  await page.getByRole("button", { name: "Закрыть описание", exact: true }).click();
+  await page.getByRole("button", { name: "Забронировать", exact: true }).click();
   const date = await selectFutureDay(page, 1);
   await expect(page.getByRole("group", { name: "Все получасовые слоты" }).getByRole("button")).toHaveCount(32);
   await expect(slotButton(page, "18:00")).toBeDisabled();
@@ -38,8 +40,9 @@ test("complete demo booking, gallery, time restrictions and reset", async ({ pag
   await expect(page.locator(".demo-notice")).toContainText("Это демонстрация. Бронирование не создаётся, данные не сохраняются и уведомления не отправляются");
   await expect(page.locator(".confirmation .admin-contact")).toContainText("Контакт администратора появится здесь.");
   await page.getByRole("button", { name: "Новое бронирование" }).click();
-  await expect(page.locator(".selection-summary")).toHaveText("Время пока не выбрано");
+  await expect(page.locator('[data-screen="welcome"]')).toBeVisible();
   await selectFutureDay(page, 1);
+  await expect(page.locator(".selection-summary")).toHaveText("Время пока не выбрано");
   await slotButton(page, "16:00").click();
   await page.getByRole("button", { name: "Продолжить", exact: true }).click();
   await expect(page.locator("#phone")).toHaveValue("");
@@ -69,6 +72,7 @@ test("required form fields and unavailable day", async ({ page }) => {
 
 test("calendar navigation respects the booking horizon", async ({ page }) => {
   await page.goto("./");
+  await openCalendar(page);
   await expect(page.getByRole("button", { name: "Предыдущий месяц" })).toBeDisabled();
   for (let i = 0; i < 3; i++) await page.getByRole("button", { name: "Следующий месяц" }).click();
   await expect(page.getByRole("button", { name: "Следующий месяц" })).toBeDisabled();

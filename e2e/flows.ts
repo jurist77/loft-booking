@@ -4,8 +4,17 @@ export function slotButton(page: Page, time: string) {
   return page.getByRole("group", { name: "Все получасовые слоты" }).getByRole("button", { name: new RegExp(`^${time} —`) });
 }
 
+/** Enter the date screen through the mounted UI; preserve existing state on Back. */
+export async function openCalendar(page: Page) {
+  if (await page.locator('[data-screen="welcome"]').count()) await page.getByRole("button", { name: "Забронировать", exact: true }).click();
+  if (await page.locator('[data-screen="contacts"]').count()) await page.getByRole("button", { name: "← Назад", exact: true }).click();
+  if (await page.locator('[data-screen="time"]').count()) await page.getByRole("button", { name: "← Назад", exact: true }).click();
+  await expect(page.locator('[data-screen="calendar"]')).toBeVisible();
+}
+
 /** Reach a fixture through the real calendar, never through client-facing demo controls. */
 export async function selectFutureDay(page: Page, offset = 1) {
+  await openCalendar(page);
   const iso = await page.evaluate(() => new Intl.DateTimeFormat("en-CA", { timeZone: "Europe/Moscow", year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date()));
   const target = new Date(`${iso}T12:00:00Z`);
   target.setUTCDate(target.getUTCDate() + offset);
