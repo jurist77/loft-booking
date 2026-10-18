@@ -1,25 +1,10 @@
-import Image from "next/image";
 import { BookingClient } from "@/components/booking-client";
-import { Gallery } from "@/components/gallery";
-import { ArrowIcon, SparkIcon } from "@/components/icons";
-import { STUDIO } from "@/lib/studio";
-import { AdminContact } from "@/components/admin-contact";
-import { assetPath } from "@/lib/deployment";
 
 export default function Home() {
-  return <>
+  return <div className="stepper-app">
     <a href="#main" className="skip-link">Перейти к содержимому</a>
     <div className="demo-banner" role="note"><strong>Демонстрационная версия</strong><span>Используйте только вымышленные данные</span></div>
-    <header className="site-header section-shell"><a href="#" className="wordmark" aria-label="Loft Studio — главная"><span className="brand-symbol" aria-hidden="true">l<span>s</span></span><span>loft<span className="wordmark-light">studio</span><small>ПРОСТРАНСТВО ДЛЯ ВСТРЕЧ</small></span></a><nav aria-label="Основная навигация"><a href="#space">О пространстве</a><a href="#details">Детали</a><a href="#booking" className="nav-booking">Выбрать дату <span aria-hidden="true"><ArrowIcon /></span></a></nav></header>
-    <main id="main">
-      <section className="hero section-shell" aria-labelledby="hero-title"><div className="hero-copy"><p className="eyebrow"><span className="tiny-dot" /> Москва · Loft Studio</p><h1 id="hero-title">Место для<br />ваших <em>особенных</em><br />встреч.</h1><p className="hero-description">Тёплый свет. Близкие люди.<br />Пространство, которое становится вашим.</p><a className="button button-dark hero-cta" href="#booking">Забронировать <span aria-hidden="true"><ArrowIcon /></span></a><div className="hero-note"><span className="hero-line" />Одна студия. Только ваша компания.</div></div><div className="hero-visual"><div className="hero-image"><Image src={assetPath(STUDIO.photos[0].src)} alt={STUDIO.photos[0].alt} fill sizes="(max-width: 760px) 100vw, 55vw" priority /><span className="image-placeholder-label">Временная иллюстрация</span></div><div className="hero-floating-note"><span className="sun-symbol" aria-hidden="true"><SparkIcon /></span><span>Для маленьких праздников<br />и больших воспоминаний</span></div><span className="hero-photo-number">01 / 04</span></div></section>
-      <div className="occasion-strip section-shell"><span>Здесь есть место для</span><p>дней рождения <i><SparkIcon /></i> уютных встреч <i><SparkIcon /></i> творческих идей <i><SparkIcon /></i> ваших историй</p></div>
-      <section className="space-section section-shell" id="space" aria-labelledby="space-heading"><div className="section-heading"><div><p className="eyebrow">Почувствуйте атмосферу</p><h2 id="space-heading">Больше, чем <em>просто стены.</em></h2></div><p>{STUDIO.description}</p></div><Gallery /><p className="photo-disclaimer"><span aria-hidden="true">*</span> Пока здесь 4 временные иллюстрации. Реальные фотографии студии необходимо добавить перед запуском.</p></section>
-      <section className="details-section section-shell" id="details" aria-labelledby="details-heading"><div className="details-card"><div className="details-intro"><span className="detail-spark" aria-hidden="true"><SparkIcon /></span><p className="eyebrow">Всё начинается с комфорта</p><h2 id="details-heading">Устраивайтесь.<br />Здесь <em>вам рады.</em></h2><p>Мы оставили главное: пространство для общения и время, которое не хочется торопить.</p></div><div className="details-list"><article><span className="detail-number">01</span><div><h3>Ваш ритм</h3><p>Каждый день с 07:00 до 23:00.<br />Аренда от часа, дальше — с шагом 30 минут.</p></div></article><article><span className="detail-number">02</span><div><h3>Ваша точка встречи</h3><p>{STUDIO.address}.<br /><span className="temporary-label">Временное описание адреса</span></p></div></article><article><span className="detail-number">03</span><div><h3>Простые договорённости</h3><p>Бережно относитесь к пространству и уважайте соседей. Формат события и дополнительные условия уточняются со студией.</p><span className="temporary-label">Предварительные правила аренды</span></div></article></div></div></section>
-      <div className="section-shell home-admin"><AdminContact /></div>
-      <BookingClient />
-      <section className="closing-note section-shell"><span aria-hidden="true"><SparkIcon /></span><p>Лучшие моменты — те,<br />что мы <em>проводим вместе.</em></p><a href="#booking" aria-label="Перейти к бронированию"><ArrowIcon /></a></section>
-    </main>
-    <footer className="site-footer section-shell"><a className="footer-brand" href="#">loft studio<span>Место для ваших встреч.</span></a><p>Клиентский прототип · этап 1<br />Без реального бронирования и оплаты</p><a href="#main">Наверх ↑</a></footer>
-  </>;
+    <header className="site-header section-shell"><span className="wordmark" aria-label="Loft Studio — главная"><span className="brand-symbol" aria-hidden="true">l<span>s</span></span><span>loft<span className="wordmark-light">studio</span><small>ПРОСТРАНСТВО ДЛЯ ВСТРЕЧ</small></span></span><p>Место для ваших встреч.</p></header>
+    <main id="main" className="stepper-main" tabIndex={-1}><BookingClient /></main>
+  </div>;
 }

@@ -7,7 +7,7 @@ const baseURL = process.env.ACCEPTANCE_BASE_URL || "http://127.0.0.1:4173/loft-b
 const target = new URL(baseURL);
 const local = ["localhost", "127.0.0.1", "[::1]"].includes(target.hostname);
 assert.ok(local || target.protocol === "https:", "A public DEMO must use HTTPS");
-const output = new URL("../docs/acceptance/v1.2/", import.meta.url);
+const output = new URL("../docs/acceptance/v1.3/", import.meta.url);
 const browser = await chromium.launch({ executablePath: process.env.CHROMIUM_PATH || "/usr/bin/chromium" });
 const results = { testedURL: baseURL, publicHTTPS: !local && target.protocol === "https:", checkedAt: new Date().toISOString(), browser: browser.version(), widths: [] };
 try {
@@ -21,19 +21,27 @@ try {
     const stages = [];
     async function checkStage(name) {
       assert.equal(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth), false, `Horizontal overflow: ${width}px ${name}`);
+      assert.equal(await page.locator("[data-screen]").count(), 1);
       stages.push(name);
     }
     const response = await page.goto(baseURL);
     assert.equal(response.status(), 200);
     await expect(page.getByText("Демонстрационная версия", { exact: true })).toBeVisible();
-    await expect(page.locator(".slots button")).toHaveCount(32);
+    await expect(page.locator('[data-screen="welcome"]')).toBeVisible();
+    await expect(page.locator(".calendar, .slots, .contact-fields")).toHaveCount(0);
+    assert.equal(await page.evaluate(() => document.documentElement.scrollHeight > innerHeight + 1), false);
+    await checkStage("welcome");
+    await page.getByRole("button", { name: "О пространстве", exact: true }).click();
     await page.locator(".gallery-grid").scrollIntoViewIfNeeded();
     assert.equal(await page.locator(".gallery-grid img").evaluateAll(async (images) => {
       await Promise.all(images.map((image) => image.decode()));
       return images.length === 4 && images.every((image) => image.complete && image.naturalWidth > 0);
     }), true);
-    await checkStage("home");
+    await page.getByRole("button", { name: "Закрыть описание", exact: true }).click();
+    await page.getByRole("button", { name: "Забронировать", exact: true }).click();
+    await checkStage("calendar");
     await selectFutureDay(page, 1);
+    await expect(page.locator(".slots button")).toHaveCount(32);
     await expect(page.locator(".busy-slot")).toHaveCount(8);
     await checkStage("busy-grid");
     await selectFutureDay(page, 6);
@@ -50,7 +58,8 @@ try {
     await expect(page.locator(".demo-notice")).toContainText("Это демонстрация. Бронирование не создаётся, данные не сохраняются и уведомления не отправляются");
     await checkStage("confirmation");
     await page.reload();
-    await expect(page.locator(".selection-summary")).toHaveText("Время пока не выбрано");
+    await expect(page.locator('[data-screen="welcome"]')).toBeVisible();
+    await expect(page.locator(".calendar, .slots, .contact-fields")).toHaveCount(0);
     const storage = await page.evaluate(() => ({ local: { ...localStorage }, session: { ...sessionStorage }, cookie: document.cookie, url: location.href }));
     assert.deepEqual(storage.local, {}); assert.deepEqual(storage.session, {});
     assert.doesNotMatch(JSON.stringify(storage), /79261234567|9261234567|Тест|Пример/);

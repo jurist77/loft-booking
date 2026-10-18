@@ -43,7 +43,8 @@ async function audit(folder) {
 await stat(resolve(root, ".nojekyll"));
 const html = await readFile(resolve(root, "index.html"), "utf8");
 assert.ok(html.includes("Демонстрационная версия"));
-assert.ok(html.includes("Загружаем календарь"));
+assert.ok(html.includes('data-screen="welcome"'));
+assert.ok(!html.includes('class="calendar"') && !html.includes('class="slots"'));
 assert.ok(!html.includes("+79261234567") && !html.includes("Тест Пример"));
 await audit(root);
 console.log(JSON.stringify({ files, bytes, basePath, artifactSha256: fingerprint.digest("hex"), localAssetsExist: true, credentialPatternsFound: false, sourceMapsOrPrivateFiles: false }, null, 2));

@@ -1,5 +1,5 @@
 import { expect, test } from "@playwright/test";
-import { fillDemoContact, selectFutureDay, slotButton } from "./flows";
+import { fillDemoContact, openCalendar, selectFutureDay, slotButton } from "./flows";
 
 test("demo is labelled and never transmits or persists entered contacts", async ({ page, context, baseURL }) => {
   const requests: { method: string; url: string; body: string }[] = [];
@@ -30,13 +30,15 @@ test("demo is labelled and never transmits or persists entered contacts", async 
   expect(JSON.stringify(await context.cookies())).not.toMatch(/Демопроверка|79261234567|9261234567/);
   expect(failures).toEqual([]);
   await page.reload();
-  await expect(page.locator(".selection-summary")).toHaveText("Время пока не выбрано");
+  await expect(page.locator('[data-screen="welcome"]')).toBeVisible();
+  await expect(page.locator(".calendar, .slots, .contact-fields")).toHaveCount(0);
   await expect(page.locator(".confirmation")).toHaveCount(0);
 });
 
 test("dates are initialized at opening time rather than static build time", async ({ page }) => {
   await page.clock.setFixedTime(new Date("2026-11-02T21:05:00Z")); // November 3 in Moscow.
   await page.goto("./");
+  await openCalendar(page);
   await expect(page.locator('.calendar-day[aria-current="date"]')).toHaveAttribute("aria-label", "3 ноября 2026 г.");
   await expect(page.locator(".calendar-footnote")).toContainText("3 февраля");
   await selectFutureDay(page, 1);
@@ -44,16 +46,16 @@ test("dates are initialized at opening time rather than static build time", asyn
   await expect(slotButton(page, "18:00")).toBeDisabled();
 });
 
-test("hash navigation, reload and all local images work in a repository subdirectory", async ({ page }) => {
+test("React navigation, reload and all local images work in a repository subdirectory", async ({ page }) => {
   await page.goto("./");
-  await page.getByRole("link", { name: "Забронировать", exact: true }).click();
-  await expect(page).toHaveURL(/#booking$/);
-  await page.getByRole("link", { name: "Loft Studio — главная", exact: true }).click();
-  await expect(page).toHaveURL(/#$/);
-  await page.goBack(); await expect(page).toHaveURL(/#booking$/);
-  await page.goForward(); await expect(page).toHaveURL(/#$/);
-  await page.reload();
+  const originalURL = page.url();
+  await page.evaluate(() => Reflect.set(window, "stepperDocumentMarker", "same-document"));
+  await openCalendar(page);
+  await expect(page).toHaveURL(originalURL);
+  await page.getByRole("button", { name: "← Назад", exact: true }).click();
+  expect(await page.evaluate(() => Reflect.get(window, "stepperDocumentMarker"))).toBe("same-document");
   await expect(page.getByRole("heading", { level: 1 })).toContainText("Место для");
+  await page.getByRole("button", { name: "О пространстве", exact: true }).click();
   await page.locator(".gallery-grid").scrollIntoViewIfNeeded();
   await page.locator(".gallery-grid img").evaluateAll(async (images) => { await Promise.all(images.map((image) => (image as HTMLImageElement).decode())); });
   const images = await page.locator(".gallery-grid img").evaluateAll((items) => items.map((image) => ({ ok: (image as HTMLImageElement).complete && (image as HTMLImageElement).naturalWidth > 0, path: new URL((image as HTMLImageElement).src).pathname })));

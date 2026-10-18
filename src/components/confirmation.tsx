@@ -9,11 +9,11 @@ import { DEMO_WARNING } from "@/lib/demo";
 
 export function Confirmation({ value, onBack }: { value: ConfirmationData; onBack: () => void }) {
   const title = useRef<HTMLHeadingElement>(null);
-  useEffect(() => { title.current?.focus(); title.current?.scrollIntoView({ behavior: window.matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth", block: "center" }); }, []);
+  useEffect(() => { title.current?.focus({ preventScroll: true }); window.scrollTo({ top: 0, behavior: "instant" }); }, []);
   return <section className="confirmation" aria-labelledby="confirmation-title">
     <span className="confirmation-check" aria-hidden="true">✓</span>
     <p className="eyebrow">Loft Studio · выбранное время</p>
-    <h3 id="confirmation-title" tabIndex={-1} ref={title}>Ваше бронирование</h3>
+    <h3 id="confirmation-title" data-step-heading tabIndex={-1} ref={title}>Ваше бронирование</h3>
     <dl className="confirmation-details">
       <div><dt>Дата аренды</dt><dd>{formatDate(value.date, { day: "numeric", month: "long", year: "numeric" })}</dd></div>
       <div><dt>Время аренды</dt><dd>{timeLabel(value.start)}–{timeLabel(value.end)}</dd></div>

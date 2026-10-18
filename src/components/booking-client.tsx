@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useSyncExternalStore } from "react";
+import { Welcome } from "./welcome";
 import { Booking } from "./booking";
 import { createDemoBookings } from "@/lib/demo-bookings";
 
@@ -19,8 +20,5 @@ function InitializedBooking() {
 
 export function BookingClient() {
   const hydrated = useSyncExternalStore(subscribe, clientSnapshot, serverSnapshot);
-  return hydrated ? <InitializedBooking /> : <section id="booking" className="section-shell booking-loading" aria-label="Календарь бронирования">
-    <p role="status">Загружаем календарь…</p>
-    <noscript>Для демонстрационного бронирования включите JavaScript в браузере.</noscript>
-  </section>;
+  return hydrated ? <InitializedBooking /> : <><Welcome /><noscript>Для демонстрационного бронирования включите JavaScript в браузере.</noscript></>;
 }
