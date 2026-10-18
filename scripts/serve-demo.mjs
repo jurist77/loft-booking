@@ -6,7 +6,7 @@ import { resolve, sep, extname } from "node:path";
 const root = resolve("out");
 const basePath = process.env.NEXT_PUBLIC_BASE_PATH ?? "/loft-booking";
 const port = Number(process.env.DEMO_PORT || 4173);
-const mime = { ".html": "text/html; charset=utf-8", ".js": "text/javascript; charset=utf-8", ".css": "text/css; charset=utf-8", ".svg": "image/svg+xml", ".json": "application/json", ".txt": "text/plain; charset=utf-8", ".ico": "image/x-icon", ".png": "image/png", ".woff2": "font/woff2" };
+const mime = { ".html": "text/html; charset=utf-8", ".js": "text/javascript; charset=utf-8", ".css": "text/css; charset=utf-8", ".svg": "image/svg+xml", ".json": "application/json", ".txt": "text/plain; charset=utf-8", ".ico": "image/x-icon", ".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".woff2": "font/woff2" };
 
 const server = createServer(async (request, response) => {
   if (!["GET", "HEAD"].includes(request.method || "")) { response.writeHead(405).end(); return; }

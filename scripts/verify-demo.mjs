@@ -7,7 +7,7 @@ const baseURL = process.env.ACCEPTANCE_BASE_URL || "http://127.0.0.1:4173/loft-b
 const target = new URL(baseURL);
 const local = ["localhost", "127.0.0.1", "[::1]"].includes(target.hostname);
 assert.ok(local || target.protocol === "https:", "A public DEMO must use HTTPS");
-const output = new URL("../docs/acceptance/v1.3/", import.meta.url);
+const output = new URL("../docs/acceptance/v1.4/", import.meta.url);
 const browser = await chromium.launch({ executablePath: process.env.CHROMIUM_PATH || "/usr/bin/chromium" });
 const results = { testedURL: baseURL, publicHTTPS: !local && target.protocol === "https:", checkedAt: new Date().toISOString(), browser: browser.version(), widths: [] };
 try {
@@ -26,6 +26,8 @@ try {
     }
     const response = await page.goto(baseURL);
     assert.equal(response.status(), 200);
+    await expect(page).toHaveTitle("studio 19.25 — Творческое пространство");
+    await page.locator(".studio-brand img").evaluate((image) => image.decode());
     await expect(page.getByText("Демонстрационная версия", { exact: true })).toBeVisible();
     await expect(page.locator('[data-screen="welcome"]')).toBeVisible();
     await expect(page.locator(".calendar, .slots, .contact-fields")).toHaveCount(0);
@@ -41,7 +43,7 @@ try {
     await page.getByRole("button", { name: "Забронировать", exact: true }).click();
     await checkStage("calendar");
     await selectFutureDay(page, 1);
-    await expect(page.locator(".slots button")).toHaveCount(32);
+    await expect(page.locator(".slots button")).toHaveCount(28);
     await expect(page.locator(".busy-slot")).toHaveCount(8);
     await checkStage("busy-grid");
     await selectFutureDay(page, 6);

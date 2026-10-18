@@ -1,0 +1,26 @@
+{
+  "version": "1.4",
+  "testedURL": "http://127.0.0.1:4173/loft-booking/",
+  "capturedAt": "2026-10-18T16:47:40.008Z",
+  "browser": "154.0.8037.57",
+  "screenshots": [
+    "01-welcome-desktop.png",
+    "02-calendar-desktop.png",
+    "03-time-desktop.png",
+    "04-contacts-desktop.png",
+    "05-confirmation-desktop.png",
+    "01-welcome-mobile.png",
+    "02-calendar-mobile.png",
+    "03-time-mobile.png",
+    "04-contacts-mobile.png",
+    "05-confirmation-mobile.png"
+  ],
+  "checks": {
+    "exclusiveScreens": 5,
+    "welcomeFitsViewport": true,
+    "slots": 28,
+    "interval": "10:00–12:30",
+    "phoneNormalized": true,
+    "clientErrors": []
+  }
+}

@@ -1,4 +1,3 @@
-export const EVENT_TYPES = ["День рождения", "Аренда студии", "Другое"] as const;
 export const CHANNELS = ["Telegram", "SMS"] as const;
 export type NotificationChannel = typeof CHANNELS[number];
 
@@ -6,7 +5,6 @@ export type ContactDetails = {
   firstName: string;
   lastName: string;
   phone: string;
-  eventType: string;
 };
 // Notification preferences are retained for a future integration, hidden in demo UI.
 // An absent consent value never means consent was given; production needs legal review.
@@ -31,7 +29,6 @@ export function validateContact(input: ContactInput): { errors: ContactErrors; p
   }
   const phone = normalizePhone(input.phone);
   if (!phone) errors.phone = "Введите российский мобильный номер, например +7 926 123-45-67.";
-  if (!(EVENT_TYPES as readonly string[]).includes(input.eventType)) errors.eventType = "Выберите вид мероприятия.";
   if (input.channel !== undefined && !(CHANNELS as readonly string[]).includes(input.channel)) errors.channel = "Выберите допустимый канал уведомления.";
   return { errors, phone };
 }

@@ -32,7 +32,6 @@ export async function fillDemoContact(page: Page) {
   await page.getByLabel("Имя", { exact: false }).first().fill("Тест");
   await page.getByLabel("Фамилия", { exact: false }).fill("Пример");
   await page.getByLabel("Мобильный телефон", { exact: false }).fill("9261234567");
-  await page.getByLabel("Тип мероприятия", { exact: false }).selectOption("Другое");
 }
 
 export async function triggerAvailabilityConflict(page: Page, baseURL: string) {

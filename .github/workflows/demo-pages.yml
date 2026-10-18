@@ -130,5 +130,5 @@ jobs:
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           name: published-demo-verification
-          path: docs/acceptance/v1.3/
+          path: docs/acceptance/v1.4/
           retention-days: 7

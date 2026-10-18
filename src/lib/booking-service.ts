@@ -23,7 +23,7 @@ export function createDemoService(readBookings: (now: Date) => Promise<Booking[]
       if (error) throw new Error(error);
       return {
         date: request.date, start: request.start, end: request.end, demo: true,
-        contact: { firstName: request.contact.firstName.trim(), lastName: request.contact.lastName.trim(), phone: phone!, eventType: request.contact.eventType },
+        contact: { firstName: request.contact.firstName.trim(), lastName: request.contact.lastName.trim(), phone: phone! },
         ...(request.contact.channel ? { channel: request.contact.channel as NotificationChannel } : {}),
       };
     },

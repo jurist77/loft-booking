@@ -1,6 +1,6 @@
 @import "tailwindcss";
 
-:root { --paper: #f8f6f0; --ink: #263d32; --muted: #77786d; --line: #dedfd5; --sand: #eae5d9; --green-light: #eaf0e7; --accent: #b09c73; }
+:root { --paper: #f8f6f0; --ink: #484f52; --muted: #77786d; --line: #dedfd5; --sand: #eae5d9; --green-light: #eaf0e7; --accent: #b09c73; --brand-grey: #7d8486; --brand-coral: #e89482; }
 * { box-sizing: border-box; }
 html { scroll-behavior: smooth; scroll-padding-top: 28px; }
 body { margin: 0; background: var(--paper); color: var(--ink); font-family: Arial, Helvetica, sans-serif; font-size: 15px; line-height: 1.6; -webkit-font-smoothing: antialiased; }
@@ -445,4 +445,26 @@ h1 em, h2 em, .closing-note em { font-weight: 400; }
   .stepper-app .site-header { height: 56px; }
   .welcome-screen .hero h1 { font-size: 32px; margin-block: 8px; }
   .welcome-screen .hero-image { height: 110px; }
+}
+
+/* The owner's JPEG is kept byte-for-byte; only its outer white margin is clipped. */
+.studio-brand { display: block; position: relative; flex-shrink: 0; width: clamp(154px, 20vw, 210px); aspect-ratio: 2.1; overflow: hidden; }
+.studio-brand-image { position: absolute; left: 50%; top: 50%; width: 150%; max-width: none; height: auto; transform: translate(-50%, -50%); }
+.stepper-app .site-header { height: 110px; }
+.stepper-app .site-header > p { color: #62696b; }
+.hero h1 em { color: var(--brand-grey); }
+.tiny-dot { background: var(--brand-coral); }
+.hero-line { background: var(--brand-coral); }
+.hero-floating-note .sun-symbol { color: #d68b7b; }
+.step-number { border-color: #e3b8ad; color: #62696b; background: #f5e6e0; }
+.calendar-day.today { border-color: var(--brand-coral); }
+.button-dark:hover, .time-grid-panel .selected-slot:hover:enabled { background: #62696b; }
+.confirmation-check { background: #f4e3dd; color: #62696b; }
+.demo-banner { color: #555e61; }
+::selection { background: #f4ded6; }
+@media (max-width: 700px) { .stepper-app .site-header { height: 84px; } }
+@media (max-width: 700px) and (max-height: 650px) {
+  .stepper-app .site-header { height: 78px; }
+  .welcome-screen .hero h1 { font-size: 30px; }
+  .welcome-screen .hero-image { height: 92px; }
 }

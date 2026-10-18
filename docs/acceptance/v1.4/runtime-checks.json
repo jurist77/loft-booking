@@ -1,0 +1,136 @@
+{
+  "testedURL": "http://127.0.0.1:4173/loft-booking/",
+  "publicHTTPS": false,
+  "checkedAt": "2026-10-18T16:47:09.375Z",
+  "browser": "154.0.8037.57",
+  "widths": [
+    {
+      "width": 320,
+      "stages": [
+        "welcome",
+        "calendar",
+        "busy-grid",
+        "selection",
+        "form",
+        "confirmation"
+      ],
+      "noOverflow": true,
+      "noClientErrors": true,
+      "noFailedAssets": true,
+      "noContactTransmissionOrPersistence": true,
+      "reloadClearsState": true
+    },
+    {
+      "width": 360,
+      "stages": [
+        "welcome",
+        "calendar",
+        "busy-grid",
+        "selection",
+        "form",
+        "confirmation"
+      ],
+      "noOverflow": true,
+      "noClientErrors": true,
+      "noFailedAssets": true,
+      "noContactTransmissionOrPersistence": true,
+      "reloadClearsState": true
+    },
+    {
+      "width": 375,
+      "stages": [
+        "welcome",
+        "calendar",
+        "busy-grid",
+        "selection",
+        "form",
+        "confirmation"
+      ],
+      "noOverflow": true,
+      "noClientErrors": true,
+      "noFailedAssets": true,
+      "noContactTransmissionOrPersistence": true,
+      "reloadClearsState": true
+    },
+    {
+      "width": 390,
+      "stages": [
+        "welcome",
+        "calendar",
+        "busy-grid",
+        "selection",
+        "form",
+        "confirmation"
+      ],
+      "noOverflow": true,
+      "noClientErrors": true,
+      "noFailedAssets": true,
+      "noContactTransmissionOrPersistence": true,
+      "reloadClearsState": true
+    },
+    {
+      "width": 430,
+      "stages": [
+        "welcome",
+        "calendar",
+        "busy-grid",
+        "selection",
+        "form",
+        "confirmation"
+      ],
+      "noOverflow": true,
+      "noClientErrors": true,
+      "noFailedAssets": true,
+      "noContactTransmissionOrPersistence": true,
+      "reloadClearsState": true
+    },
+    {
+      "width": 768,
+      "stages": [
+        "welcome",
+        "calendar",
+        "busy-grid",
+        "selection",
+        "form",
+        "confirmation"
+      ],
+      "noOverflow": true,
+      "noClientErrors": true,
+      "noFailedAssets": true,
+      "noContactTransmissionOrPersistence": true,
+      "reloadClearsState": true
+    },
+    {
+      "width": 1024,
+      "stages": [
+        "welcome",
+        "calendar",
+        "busy-grid",
+        "selection",
+        "form",
+        "confirmation"
+      ],
+      "noOverflow": true,
+      "noClientErrors": true,
+      "noFailedAssets": true,
+      "noContactTransmissionOrPersistence": true,
+      "reloadClearsState": true
+    },
+    {
+      "width": 1440,
+      "stages": [
+        "welcome",
+        "calendar",
+        "busy-grid",
+        "selection",
+        "form",
+        "confirmation"
+      ],
+      "noOverflow": true,
+      "noClientErrors": true,
+      "noFailedAssets": true,
+      "noContactTransmissionOrPersistence": true,
+      "reloadClearsState": true
+    }
+  ]
+}

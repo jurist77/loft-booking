@@ -31,7 +31,7 @@ test("five exclusive screens preserve time and contacts on Back and reset on a n
   await expect(page.locator("#firstName")).toHaveValue("Тест");
   await expect(page.locator("#lastName")).toHaveValue("Пример");
   await expect(page.locator("#phone")).toHaveValue("9261234567");
-  await expect(page.locator("#eventType")).toHaveValue("Другое");
+  await expect(page.locator("#eventType, select")).toHaveCount(0);
   await page.getByRole("button", { name: "Подтвердить выбор" }).click();
   await expect(page.locator('[data-screen="confirmation"]')).toBeVisible();
   await expect(page.locator("[data-screen]")).toHaveCount(1);

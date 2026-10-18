@@ -1,6 +1,7 @@
 "use client";
 
 import { getSlots, timeLabel, durationLabel, formatDate, type Booking } from "@/lib/availability";
+import { STUDIO } from "@/lib/studio";
 import { selectSlot, type RentalSelection } from "@/lib/selection";
 
 type Props = {
@@ -12,7 +13,7 @@ export function TimeGrid({ date, bookings, now, selection, onSlot, onReset }: Pr
   const slots = getSlots(date, bookings, now);
   const noFreeHour = slots.every((slot) => selectSlot(date, slot.start, null, bookings, now).error);
   return <div className="time-grid-panel">
-    <div className="time-heading"><h4>{formatDate(date)}</h4><span>07:00–23:00</span></div>
+    <div className="time-heading"><h4>{formatDate(date)}</h4><span>{timeLabel(STUDIO.open)}–{timeLabel(STUDIO.close)}</span></div>
     <div className="slots" role="group" aria-label="Все получасовые слоты" aria-describedby="grid-instructions">
       {slots.map((slot) => {
         const selected = !!selection && slot.start >= selection.start && slot.start < selection.end;

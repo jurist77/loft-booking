@@ -1,6 +1,6 @@
 "use client";
 
-import { EVENT_TYPES, type ContactErrors, type ContactInput } from "@/lib/validation";
+import { type ContactErrors, type ContactInput } from "@/lib/validation";
 
 type Props = { value: ContactInput; errors: ContactErrors; onChange: (value: ContactInput) => void };
 
@@ -21,11 +21,7 @@ export function ContactForm({ value, errors, onChange }: Props) {
       <label className="field" htmlFor="phone">Мобильный телефон <span aria-hidden="true">*</span>
         <input id="phone" name="phone" type="tel" autoComplete="off" inputMode="tel" placeholder="+7 (___) ___-__-__" value={value.phone} onChange={(e) => set("phone", e.target.value)} required maxLength={30} {...attributes("phone")} />{error("phone")}
       </label>
-      <label className="field" htmlFor="eventType">Тип мероприятия <span aria-hidden="true">*</span>
-        <select id="eventType" name="eventType" value={value.eventType} onChange={(e) => set("eventType", e.target.value)} required {...attributes("eventType")}>
-          <option value="">Выберите вид мероприятия</option>{EVENT_TYPES.map((type) => <option key={type}>{type}</option>)}
-        </select>{error("eventType")}
-      </label>
+
     </div>
   );
 }

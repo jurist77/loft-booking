@@ -14,7 +14,7 @@ import { AdminContact } from "./admin-contact";
 import { Welcome } from "./welcome";
 import { DEMO_WARNING } from "@/lib/demo";
 
-const EMPTY_CONTACT: ContactInput = { firstName: "", lastName: "", phone: "", eventType: "" };
+const EMPTY_CONTACT: ContactInput = { firstName: "", lastName: "", phone: "" };
 
 export function Booking({ initialNow, initialBookings }: { initialNow: string; initialBookings: BookingData[] }) {
   const [now, setNow] = useState(() => new Date(initialNow));

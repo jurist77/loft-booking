@@ -12,13 +12,13 @@ describe("Continuous selection in the time grid", () => {
   it("extends one slot to the right", () => { expect(choose(660, hour).selection).toEqual({ start: 600, end: 690 }); });
   it("extends to the left", () => { expect(choose(570, hour).selection).toEqual({ start: 570, end: 660 }); });
   it("includes intermediate free slots when extending to the right", () => { expect(choose(720, hour).selection).toEqual({ start: 600, end: 750 }); });
-  it("includes intermediate free slots when extending to the left", () => { expect(choose(480, hour).selection).toEqual({ start: 480, end: 660 }); });
+  it("includes intermediate free slots when extending to the left", () => { expect(choose(540, hour).selection).toEqual({ start: 540, end: 660 }); });
   it("does not cross an occupied interval on the right", () => {
     const result = choose(750, hour, [{ date, start: 690, end: 720 }]);
     expect(result.selection).toEqual(hour); expect(result.error).toMatch(/занято/);
   });
   it("does not cross an occupied interval on the left", () => {
-    const result = choose(450, hour, [{ date, start: 510, end: 540 }]);
+    const result = choose(540, hour, [{ date, start: 570, end: 600 }]);
     expect(result.selection).toEqual(hour); expect(result.error).toMatch(/занято/);
   });
   it("cannot start without a whole free hour", () => {
@@ -36,10 +36,11 @@ describe("Continuous selection in the time grid", () => {
     expect(choose(720, { start: 600, end: 750 }).selection).toEqual({ start: 600, end: 750 });
   });
   it("cannot start at 22:30, but can extend to include it and finish at 23:00", () => {
+    expect(choose(1320).selection).toEqual({ start: 1320, end: 1380 });
     expect(choose(1350).selection).toBeNull();
     expect(choose(1350, { start: 1260, end: 1320 }).selection).toEqual({ start: 1260, end: 1380 });
   });
-  it.each([390, 1380, 1410, 601, NaN, Infinity])("rejects invalid slot %s without changing selection", (slot) => {
+  it.each([390, 510, 1380, 1410, 601, NaN, Infinity])("rejects invalid slot %s without changing selection", (slot) => {
     const result = choose(slot, hour); expect(result.selection).toEqual(hour); expect(result.error).not.toBeNull();
   });
   it("permits booking up to an adjacent occupied boundary", () => {
