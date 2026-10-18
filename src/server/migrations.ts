@@ -2,9 +2,8 @@ import "server-only";
 import { createHash } from "node:crypto";
 import { readdir, readFile } from "node:fs/promises";
 import { join } from "node:path";
-import type { Pool } from "pg";
+import type Database from "better-sqlite3";
 
-export const MIGRATION_LOCK = 192500210;
 type MigrationCode = "INVALID_FILES" | "HISTORY_MISMATCH" | "MIGRATION_LOCKED" | "MIGRATION_FAILED";
 export class MigrationError extends Error {
   readonly code: MigrationCode;
@@ -26,40 +25,30 @@ export async function migrationFiles(directory: string) {
   } catch (error) { throw error instanceof MigrationError ? error : new MigrationError("INVALID_FILES"); }
 }
 
-export async function migrate(pool: Pool, directory: string): Promise<number[]> {
+export async function migrate(db: Database.Database, directory: string): Promise<number[]> {
   const files = await migrationFiles(directory);
-  const client = await pool.connect().catch(() => { throw new MigrationError("MIGRATION_FAILED"); });
-  let locked = false; let transaction = false;
   try {
-    const lock = await client.query<{ locked: boolean }>("SELECT pg_try_advisory_lock($1::bigint) AS locked", [MIGRATION_LOCK]);
-    if (!lock.rows[0].locked) throw new MigrationError("MIGRATION_LOCKED");
-    locked = true;
-    await client.query("BEGIN"); transaction = true;
-    await client.query(`CREATE TABLE IF NOT EXISTS studio.schema_migrations (
-      version bigint PRIMARY KEY CHECK (version > 0),
-      name text NOT NULL UNIQUE, checksum text NOT NULL CHECK (checksum ~ '^[0-9a-f]{64}$'),
-      applied_at timestamptz NOT NULL DEFAULT clock_timestamp()
-    )`);
-    const history = await client.query<{ version: string; name: string; checksum: string }>("SELECT version, name, checksum FROM studio.schema_migrations ORDER BY version");
-    for (const [index, row] of history.rows.entries()) {
-      const file = files[index];
-      if (!file || Number(row.version) !== file.version || row.name !== file.name || row.checksum !== file.checksum) throw new MigrationError("HISTORY_MISMATCH");
-    }
-    const applied = [];
-    for (const file of files.slice(history.rows.length)) {
-      await client.query(file.sql);
-      await client.query("INSERT INTO studio.schema_migrations (version, name, checksum) VALUES ($1, $2, $3)", [file.version, file.name, file.checksum]);
-      applied.push(file.version);
-    }
-    await client.query("COMMIT"); transaction = false;
-    return applied;
+    return db.transaction(() => {
+      db.exec(`CREATE TABLE IF NOT EXISTS schema_migrations (
+        version INTEGER PRIMARY KEY CHECK (version > 0),
+        name TEXT NOT NULL UNIQUE, checksum TEXT NOT NULL CHECK (length(checksum) = 64),
+        applied_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+      ) STRICT`);
+      const history = db.prepare("SELECT version, name, checksum FROM schema_migrations ORDER BY version").all() as { version: number; name: string; checksum: string }[];
+      for (const [index, row] of history.entries()) {
+        const file = files[index];
+        if (!file || row.version !== file.version || row.name !== file.name || row.checksum !== file.checksum) throw new MigrationError("HISTORY_MISMATCH");
+      }
+      const applied = [];
+      for (const file of files.slice(history.length)) {
+        db.exec(file.sql);
+        db.prepare("INSERT INTO schema_migrations (version, name, checksum) VALUES (?, ?, ?)").run(file.version, file.name, file.checksum);
+        applied.push(file.version);
+      }
+      return applied;
+    }).immediate();
   } catch (error) {
-    if (transaction) await client.query("ROLLBACK").catch(() => {});
-    throw error instanceof MigrationError ? error : new MigrationError("MIGRATION_FAILED");
-  } finally {
-    // Destroy this session if unlocking failed; session locks must never return to a pool.
-    let broken = false;
-    if (locked) await client.query("SELECT pg_advisory_unlock($1::bigint)", [MIGRATION_LOCK]).catch(() => { broken = true; });
-    client.release(broken);
+    if (error instanceof MigrationError) throw error;
+    throw new MigrationError((error as { code?: string }).code?.startsWith("SQLITE_BUSY") ? "MIGRATION_LOCKED" : "MIGRATION_FAILED");
   }
 }

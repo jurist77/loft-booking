@@ -1,5 +1,8 @@
 # Восстановление health после перезапуска PostgreSQL
 
+> Исторический отчёт PostgreSQL-этапа. Текущая SQLite-архитектура и проверки: [sqlite-acceptance.md](sqlite-acceptance.md). Исправления HTTP из PR №6 сохранены при адаптации.
+
+
 Основание: `main` на `cb0b8b1c26ab9a152587f32f88bda5d93431acf4`, после merge PR №5. Проблемный запуск: [39159260480](https://github.com/jurist77/loft-booking/actions/runs/39159260480). Исправление готовится в `fix/backend-health-recovery-ci`, без merge и без этапа 2.2.
 
 ## Диагноз

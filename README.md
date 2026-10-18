@@ -1,6 +1,6 @@
-# studio 19.25 · Творческое пространство · DEMO 1.4 / backend 2.1
+# studio 19.25 · Творческое пространство · DEMO 1.4 / SQLite backend
 
-Пять экранов одного React/Next.js приложения: Welcome → Calendar → Time → Contacts → Confirmation. На странице смонтирован только текущий экран. Серверная основа 2.1 подготовлена от `main` (`06dea2426dd421a0aa8c2b398aaf19518b841fa1`) в отдельной ветке `feat/backend-foundation-v2.1`. Публикация согласованных изменений после merge в `main` выполняется существующим GitHub Actions workflow.
+Пять экранов одного React/Next.js приложения: Welcome → Calendar → Time → Contacts → Confirmation. На странице смонтирован только текущий экран. SQLite-основа подготовлена от актуального `main` (`17851598865ec8f3aa4c835d5965a36a2d5c4349`), включая объединённый PR №6, в ветке `feat/sqlite-backend-simplification`. Публикация согласованных изменений после merge в `main` выполняется существующим GitHub Actions workflow.
 
 Welcome занимает доступную высоту экрана; галерея и прежние условия аренды открываются кнопкой «О пространстве». Дата переводит на сетку автоматически. «Назад» сохраняет дату, время и контакты; другая дата очищает время. «Новое бронирование» и перезагрузка возвращают Welcome, очищая вымышленные контакты. Состояние хранится только в памяти React.
 
@@ -26,22 +26,24 @@ npm start
 
 Если порт занят, используйте `npm run dev -- --port 3001` или `npm start -- --port 3001`.
 
-## Локальный SERVER 2.1
+## Локальный SERVER с SQLite
 
-PostgreSQL запускается бесплатно в Docker Compose; интерфейс DEMO и GitHub Pages не требуют его наличия. Команды ниже создают только локальные секреты (игнорируются Git), БД и служебный журнал миграций:
+Одно Next.js-приложение и локальный файл SQLite через `better-sqlite3`. Docker и PostgreSQL не нужны. Данные находятся вне checkout/build, каталог 0700 и файл 0600. Операции бронирования пока не открыты клиенту.
 
 ```bash
 npm ci
 npm run db:env
-npm run db:up
-npm run db:check
+npm run db:init
 npm run db:migrate
+npm run db:check
 npm run dev:server
 ```
 
-Проверка в другом терминале: `curl -i http://127.0.0.1:3000/api/health` (200 при доступной БД, 503 при отказе). Оптимизированный SERVER: `npm run build:server`, затем `npm run start:server`. Штатная остановка БД: `npm run db:stop`, без удаления volume. Серверный экран пока не позволяет начинать запись; демонстрационная занятость не используется как реальная база.
+`db:env` создаёт новый `.env.sqlite.local`, не меняя старые файлы. Стандартный путь — соседний с checkout каталог `.studio1925-local`. Проверка: `curl -i http://127.0.0.1:3000/api/health` (200 при integrity + доступной записи, 503 при отказе). Оптимизированный SERVER: `npm run build:server`, затем `npm run start:server`; остановка Ctrl+C. Отдельного DB daemon нет.
 
-Режим выбирается командами явно через `APP_MODE`, а не наличием строки подключения. `dev/build/start` — DEMO Node; `build:demo` — статический DEMO; команды с `:server` — SERVER. Инструкции для отдельной тестовой базы, интеграционных и HTTP-тестов — [backend-local-setup.md](docs/backend-local-setup.md). Применённые SQL-файлы не редактировать. Производственных секретов, бронирований и VPS-развёртывания в 2.1 нет.
+Онлайн-копия: `npm run db:backup -- --to /absolute/private-backups/new.sqlite`. Восстановление в **новый отсутствующий файл**: `SQLITE_PATH=/absolute/restore/studio.sqlite npm run db:restore -- --from /absolute/private-backups/new.sqlite`. Не копировать один live-файл при WAL. [Пошаговая инструкция](docs/backend-local-setup.md), [сравнение архитектур](docs/backend-architecture.md), [systemd/HTTPS/зашифрованный offsite backup и recovery](docs/sqlite-operations.md), [результаты проверки](docs/sqlite-acceptance.md).
+
+Режим задаётся APP_MODE явно: `dev/build/start` — DEMO Node, `build:demo` — static DEMO, команды `*:server` — SERVER. Пять экранов DEMO сохранены; SERVER показывает прежний Welcome с отключённой записью. В БД есть минимальная SQL-основа интервалов с атомарной защитой пересечений, но нет контактов/API/реальной занятости/админ-панели. VPS и уведомления на данном этапе только описаны.
 
 ## Проверки
 
@@ -55,7 +57,7 @@ npm run capture:acceptance # Пять экранов на компьютере �
 
 Браузерные тесты запускают dev-сервер автоматически либо используют уже запущенный на порту 3000 (кроме CI). В этой облачной среде Chromium установлен в `/usr/bin/chromium`. На другом компьютере установите браузер через `npx playwright install chromium` и задайте `CHROMIUM_PATH` — абсолютный путь к установленному исполняемому файлу. Без системного Chromium можно убрать `executablePath` в `playwright.config.ts`, чтобы Playwright использовал свой установленный браузер.
 
-[Приёмка 1.4](docs/acceptance/v1.4/README.md) содержит пять экранов на компьютере и телефоне, результаты и ограничения. [Инструкция GitHub Pages](docs/demo-deployment.md) описывает включение, обновление и отключение DEMO. [Архитектура VPS](docs/deployment-architecture.md) — анализ будущей системы. [Backend 2.1](docs/backend-architecture.md) описывает утверждённую основу, [пошаговая инструкция](docs/backend-local-setup.md) — локальный запуск и диагностику, [отчёт проверок](docs/backend-acceptance-v2.1.md) — фактические результаты.
+[Приёмка 1.4](docs/acceptance/v1.4/README.md) содержит пять экранов на компьютере и телефоне, результаты и ограничения. [Инструкция GitHub Pages](docs/demo-deployment.md) описывает включение, обновление и отключение DEMO. [Архитектура VPS](docs/deployment-architecture.md) — анализ будущей системы. [SQLite backend](docs/backend-architecture.md) описывает утверждённую основу, [пошаговая инструкция](docs/backend-local-setup.md) — локальный запуск и диагностику, [отчёт проверок](docs/sqlite-acceptance.md) — фактические результаты.
 
 ```bash
 npm run build:demo     # статический out/, по умолчанию путь /loft-booking
@@ -123,7 +125,7 @@ public/images/               # Четыре временные SVG-иллюст�
 docs/acceptance/v1.4/        # Пять экранов, адаптивность и результаты
 ```
 
-`BookingService` отделяет чтение доступности и подтверждение от интерфейса. На следующем этапе его можно заменить HTTP-клиентом. Реальное сохранение и атомарная защита от одновременного бронирования должны выполняться сервером и БД; для следующих этапов утверждены Next.js Route Handlers и PostgreSQL. В SERVER 2.1 реализован только health endpoint и инфраструктура БД; операций бронирования и хранения контактов нет. В DEMO базы и API нет. Введённые вымышленные данные остаются в памяти вкладки для итогового экрана и очищаются при новом бронировании, перезагрузке или закрытии страницы. В `localStorage`, `sessionStorage`, cookies или на сервер они не записываются.
+`BookingService` отделяет чтение доступности и подтверждение от интерфейса. На следующем этапе его можно заменить HTTP-клиентом. Реальное сохранение и атомарная защита от одновременного бронирования должны выполняться сервером и БД; для следующих этапов используются Next.js Route Handlers и SQLite. В SERVER реализован health endpoint и SQL-инфраструктура; операций бронирования и хранения контактов нет. В DEMO базы и API нет. Введённые вымышленные данные остаются в памяти вкладки для итогового экрана и очищаются при новом бронировании, перезагрузке или закрытии страницы. В `localStorage`, `sessionStorage`, cookies или на сервер они не записываются.
 
 ## Демонстрационные данные и правовые ограничения
 

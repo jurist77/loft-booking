@@ -1,4 +1,6 @@
 import { spawn } from "node:child_process";
+import { loadEnvFile } from "node:process";
+try { loadEnvFile(".env.sqlite.local"); } catch (error) { if (error.code !== "ENOENT") throw error; }
 
 const [mode, command, ...args] = process.argv.slice(2);
 if (!["demo", "server"].includes(mode) || !["dev", "build", "start"].includes(command)) throw new Error("Invalid Next target");

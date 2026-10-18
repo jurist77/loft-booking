@@ -1,1 +1,2 @@
-migrations/*.sql text eol=lf
+migrations/**/*.sql text eol=lf
+docs/archive/postgresql/*.sql text eol=lf

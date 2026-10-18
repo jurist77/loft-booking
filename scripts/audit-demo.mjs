@@ -5,7 +5,7 @@ import { createHash } from "node:crypto";
 
 const root = resolve("out");
 const basePath = process.env.NEXT_PUBLIC_BASE_PATH ?? "/loft-booking";
-const privateValues = ["DATABASE_URL", "MIGRATION_DATABASE_URL", "POSTGRES_PASSWORD", "POSTGRES_APP_PASSWORD", "POSTGRES_MIGRATION_PASSWORD"].map((key) => process.env[key]).filter((value) => value && value.length >= 8);
+const privateValues = ["SQLITE_PATH", "DATABASE_URL", "MIGRATION_DATABASE_URL", "POSTGRES_PASSWORD", "POSTGRES_APP_PASSWORD", "POSTGRES_MIGRATION_PASSWORD"].map((key) => process.env[key]).filter((value) => value && value.length >= 8);
 try { await stat(resolve(root, "api")); throw new Error("SERVER routes must not be exported"); } catch (error) { if (error.code !== "ENOENT") throw error; }
 const secrets = [
   /-----BEGIN (?:RSA |EC |OPENSSH |DSA )?PRIVATE KEY-----/,
@@ -21,13 +21,15 @@ async function audit(folder) {
     assert.ok(!entry.isSymbolicLink(), "Export must not contain symlinks");
     assert.ok(![".git", "node_modules", "docs", "e2e"].includes(entry.name) && !entry.name.startsWith(".env"), "Private/build source file in export");
     if (entry.isDirectory()) { await audit(file); continue; }
+    assert.ok(!/\.(sqlite|db)(-(wal|shm|journal))?$/.test(file), "Database file in public export");
     assert.ok(!file.endsWith(".map"), "Browser source maps are not part of the public artifact");
     const data = await readFile(file); files++; bytes += data.length;
+    assert.ok(!data.subarray(0, 16).equals(Buffer.from("SQLite format 3\0")), "SQLite binary in public artifact");
     fingerprint.update(relative(root, file)).update(data);
     if ([".html", ".js", ".css", ".json", ".txt", ".svg"].includes(extname(file))) {
       const text = data.toString();
       for (const value of privateValues) assert.ok(!text.includes(value), "Private environment value in public artifact (value suppressed)");
-      assert.ok(!["DATABASE_URL", "MIGRATION_DATABASE_URL", "schema_migrations", "pg_try_advisory_lock"].some((marker) => text.includes(marker)), "Server implementation leaked into public export");
+      assert.ok(!["DATABASE_URL", "MIGRATION_DATABASE_URL", "schema_migrations", "better-sqlite3", "SQLITE_PATH", "BOOKING_OVERLAP"].some((marker) => text.includes(marker)), "Server implementation leaked into public export");
       for (const rule of secrets) assert.ok(!rule.test(text), `Potential credential in ${relative(root, file)} (value suppressed)`);
       if (file.endsWith(".html")) {
         for (const match of text.matchAll(/(?:src|href)="([^"<>]+)"/g)) {

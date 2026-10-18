@@ -14,3 +14,9 @@ test-results/
 !.env.example
 next-env.d.ts
 .DS_Store
+
+*.sqlite
+*.sqlite-*
+*.db
+*.db-*
+*.partial

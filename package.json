@@ -20,27 +20,22 @@
     "build:server": "node scripts/next-mode.mjs server build",
     "start:server": "node scripts/next-mode.mjs server start",
     "db:env": "node scripts/local-env.mjs",
-    "db:up": "node scripts/database-compose.mjs dev up",
-    "db:stop": "node scripts/database-compose.mjs dev stop",
-    "db:status": "node scripts/database-compose.mjs dev status",
-    "db:test:up": "node scripts/database-compose.mjs test up",
-    "db:test:stop": "node scripts/database-compose.mjs test stop",
-    "db:test:status": "node scripts/database-compose.mjs test status",
-    "db:check": "node --env-file-if-exists=.env.local --conditions=react-server scripts/database-check.mjs",
-    "db:migrate": "node --env-file-if-exists=.env.local --conditions=react-server scripts/migrate.mjs",
-    "db:test:migrate": "node --env-file-if-exists=.env.test.local --conditions=react-server scripts/migrate.mjs",
-    "db:test:check": "node --env-file-if-exists=.env.test.local --conditions=react-server scripts/database-check.mjs",
-    "test:integration": "node --env-file-if-exists=.env.test.local node_modules/vitest/vitest.mjs run --config vitest.integration.config.ts",
+    "test:integration": "vitest run --config vitest.integration.config.ts",
     "test:server:http": "node scripts/verify-server.mjs",
     "test:demo:isolation": "node scripts/verify-demo-isolation.mjs",
-    "test:server:http:failure": "node scripts/verify-health-failure.mjs"
+    "test:server:http:failure": "node scripts/verify-health-failure.mjs",
+    "db:init": "node --env-file-if-exists=.env.sqlite.local --conditions=react-server scripts/database.mjs init",
+    "db:migrate": "node --env-file-if-exists=.env.sqlite.local --conditions=react-server scripts/database.mjs migrate",
+    "db:check": "node --env-file-if-exists=.env.sqlite.local --conditions=react-server scripts/database.mjs check",
+    "db:backup": "node --env-file-if-exists=.env.sqlite.local --conditions=react-server scripts/database.mjs backup",
+    "db:restore": "node --env-file-if-exists=.env.sqlite.local --conditions=react-server scripts/database.mjs restore"
   },
   "engines": {
     "node": "^24.0.0 || >=26.0.0"
   },
   "dependencies": {
+    "better-sqlite3": "13.0.3",
     "next": "16.4.2",
-    "pg": "^8.23.1",
     "react": "19.3.1",
     "react-dom": "19.3.1",
     "server-only": "^0.0.1"
@@ -48,8 +43,8 @@
   "devDependencies": {
     "@playwright/test": "^1.61.0",
     "@tailwindcss/postcss": "4.3.3",
+    "@types/better-sqlite3": "^9.6.0",
     "@types/node": "^24",
-    "@types/pg": "^8.23.1",
     "@types/react": "^19",
     "@types/react-dom": "^19",
     "eslint": "9.39.5",
