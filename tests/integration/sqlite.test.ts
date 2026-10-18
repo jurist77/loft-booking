@@ -16,7 +16,7 @@ const start = Date.parse("2030-01-15T10:00:00+03:00");
 const hour = 3600000;
 const folders: string[] = [];
 const env = () => ({ ...process.env, APP_MODE: "server", SQLITE_PATH: path });
-function sqlInsert(id: string, begin = start, end = start + hour) { return db.prepare("INSERT INTO bookings(id, starts_at, ends_at) VALUES (?, ?, ?)").run(id, begin, end); }
+function sqlInsert(id: string, begin = start, end = start + hour) { return db.prepare("INSERT INTO bookings(id, resource_id, starts_at, ends_at, first_name, last_name, phone, created_at, updated_at) VALUES (?, 'studio-19-25', ?, ?, 'Тест', 'Пример', '+79000000000', 0, 0)").run(id, begin, end); }
 function command(args: string[], overrides: Record<string, string> = {}) {
   const child = spawn(process.execPath, ["--conditions=react-server", ...args], { env: { ...env(), ...overrides }, stdio: ["pipe", "pipe", "pipe"] });
   let output = "";
@@ -26,7 +26,7 @@ function command(args: string[], overrides: Record<string, string> = {}) {
 }
 async function manifest(extra: Record<string, string> = {}) {
   const directory = mkdtempSync(join(tmpdir(), "studio-sqlite-manifest-")); folders.push(directory);
-  writeFileSync(join(directory, "0001_foundation.sql"), readFileSync(join(migrations, "0001_foundation.sql")));
+  for (const name of ["0001_foundation.sql", "0002_booking_model.sql"]) writeFileSync(join(directory, name), readFileSync(join(migrations, name)));
   for (const [name, sql] of Object.entries(extra)) writeFileSync(join(directory, name), sql);
   return directory;
 }
@@ -52,7 +52,7 @@ it("restarts without data loss and repeat initialization/migration is idempotent
   sqlInsert("fictional-test"); db.close(); initializeDatabase(databaseSettings(env()));
   db = openDatabase(databaseSettings(env())); expect(await migrate(db, migrations)).toEqual([]);
   expect(db.prepare("SELECT count(*) AS n FROM bookings").get()).toEqual({ n: 1 });
-  expect(db.prepare("SELECT count(*) AS n FROM schema_migrations").get()).toEqual({ n: 1 });
+  expect(db.prepare("SELECT count(*) AS n FROM schema_migrations").get()).toEqual({ n: 2 });
 });
 it("recovers a committed WAL transaction after the sole writer is killed without closing", async () => {
   db.close();
@@ -74,16 +74,16 @@ it("rejects modified applied SQL and returns nonzero from the CLI", async () => 
   expect(result.code).toBe(1); expect(result.output).toContain("HISTORY_MISMATCH");
 });
 it("rejects missing applied files without deleting history", async () => {
-  await migrate(db, await manifest({ "0002_probe.sql": "SELECT 1;" }));
+  await migrate(db, await manifest({ "0003_probe.sql": "SELECT 1;" }));
   await expect(migrate(db, migrations)).rejects.toMatchObject({ code: "HISTORY_MISMATCH" });
-  expect(db.prepare("SELECT count(*) AS n FROM schema_migrations").get()).toEqual({ n: 2 });
+  expect(db.prepare("SELECT count(*) AS n FROM schema_migrations").get()).toEqual({ n: 3 });
 });
 it("rolls back all pending DDL and history on SQL failure", async () => {
-  const directory = await manifest({ "0002_failure.sql": "CREATE TABLE rollback_probe(id INTEGER); SELECT missing_function();" });
+  const directory = await manifest({ "0003_failure.sql": "CREATE TABLE rollback_probe(id INTEGER); SELECT missing_function();" });
   const result = await command(["scripts/database.mjs", "migrate"], { MIGRATIONS_DIR: directory }).done;
   expect(result.code).toBe(1); expect(result.output).toContain("MIGRATION_FAILED");
   expect(db.prepare("SELECT name FROM sqlite_master WHERE name='rollback_probe'").get()).toBeUndefined();
-  expect(db.prepare("SELECT count(*) AS n FROM schema_migrations").get()).toEqual({ n: 1 });
+  expect(db.prepare("SELECT count(*) AS n FROM schema_migrations").get()).toEqual({ n: 2 });
 });
 it("serializes independent migration processes and fails safely on a held writer lock", async () => {
   const lock = command(["tests/integration/sqlite-worker.mjs", "lock"]);
@@ -93,10 +93,10 @@ it("serializes independent migration processes and fails safely on a held writer
     const blocked = await command(["scripts/database.mjs", "migrate"], { SQLITE_BUSY_TIMEOUT_MS: "50" }).done;
     expect(blocked.code).toBe(1); expect(blocked.output).toContain("MIGRATION_LOCKED");
   } finally { lock.child.stdin.end("release"); await lock.done; }
-  const directory = await manifest({ "0002_parallel.sql": "CREATE TABLE parallel_probe(id INTEGER);" });
+  const directory = await manifest({ "0003_parallel.sql": "CREATE TABLE parallel_probe(id INTEGER);" });
   const results = await Promise.all([1, 2].map(() => command(["scripts/database.mjs", "migrate"], { MIGRATIONS_DIR: directory }).done));
   expect(results.map((result) => result.code)).toEqual([0, 0]);
-  expect(db.prepare("SELECT count(*) AS n FROM schema_migrations").get()).toEqual({ n: 2 });
+  expect(db.prepare("SELECT count(*) AS n FROM schema_migrations").get()).toEqual({ n: 3 });
 });
 it("enforces half-open overlap guards including updates/cancellation and adjacency", () => {
   sqlInsert("a"); sqlInsert("adjacent", start + hour, start + 2 * hour);

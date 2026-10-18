@@ -1,4 +1,4 @@
-import { STUDIO } from "./studio";
+import { STUDIO } from "./studio.ts";
 
 /** Dates are ISO calendar dates in Moscow; intervals are half-open [start, end). */
 export type Booking = { date: string; start: number; end: number };
