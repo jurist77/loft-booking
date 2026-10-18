@@ -1,0 +1,25 @@
+{
+  "capturedAt": "2026-10-18T07:35:34.377Z",
+  "browser": "154.0.8037.57",
+  "screenshots": [
+    "01-home-desktop.png",
+    "02-home-mobile.png",
+    "03-calendar-busy.png",
+    "04-time-selection.png",
+    "05-booking-form.png",
+    "06-demo-confirmation.png",
+    "07-time-conflict.png"
+  ],
+  "checks": {
+    "mobileOverflow": false,
+    "slots": 32,
+    "busySlotsStruckThroughAndDisabled": 8,
+    "automaticEnd": "16:30 → 17:30",
+    "allowedEnds": [
+      "17:30",
+      "18:00"
+    ],
+    "conflictMessage": "Это время уже занято. Выберите другой свободный интервал.",
+    "clientErrors": []
+  }
+}
