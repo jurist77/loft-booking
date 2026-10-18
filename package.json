@@ -32,7 +32,8 @@
     "db:test:check": "node --env-file-if-exists=.env.test.local --conditions=react-server scripts/database-check.mjs",
     "test:integration": "node --env-file-if-exists=.env.test.local node_modules/vitest/vitest.mjs run --config vitest.integration.config.ts",
     "test:server:http": "node scripts/verify-server.mjs",
-    "test:demo:isolation": "node scripts/verify-demo-isolation.mjs"
+    "test:demo:isolation": "node scripts/verify-demo-isolation.mjs",
+    "test:server:http:failure": "node scripts/verify-health-failure.mjs"
   },
   "engines": {
     "node": "^24.0.0 || >=26.0.0"
