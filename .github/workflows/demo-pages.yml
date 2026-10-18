@@ -1,0 +1,134 @@
+name: Deploy Loft Booking DEMO to Pages
+
+on:
+  push:
+    branches: [feat/booking-demo-deploy-v1.2]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: pages-demo
+  cancel-in-progress: false
+
+jobs:
+  build:
+    if: github.ref == 'refs/heads/feat/booking-demo-deploy-v1.2'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pages: read
+    env:
+      NEXT_TELEMETRY_DISABLED: "1"
+    steps:
+      - name: Require a public repository for free GitHub Pages
+        env:
+          REPOSITORY_PRIVATE: ${{ github.event.repository.private }}
+        run: |
+          if [ "$REPOSITORY_PRIVATE" != "false" ]; then
+            echo "::error::Free Pages requires a public repository. The owner must review visibility; this workflow never changes it."
+            exit 1
+          fi
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
+        with:
+          node-version: "24"
+          cache: npm
+      - name: Read Pages metadata
+        id: pages
+        uses: actions/configure-pages@45bfe0192ca1faeb007ade9deae92b16b8254a0d # v6
+      - run: npm ci
+      - run: npm test
+      - run: npm run typecheck
+      - run: npm run lint
+      - name: Build Node target for future VPS compatibility
+        run: npm run build
+      - name: Build static DEMO
+        run: npm run build:demo
+        env:
+          NEXT_PUBLIC_BASE_PATH: ${{ steps.pages.outputs.base_path }}
+      - name: Install test browser
+        run: npx playwright install --with-deps chromium
+      - name: Test the exported site, including privacy and subdirectory routing
+        env:
+          NEXT_PUBLIC_BASE_PATH: ${{ steps.pages.outputs.base_path }}
+        run: |
+          export CHROMIUM_PATH="$(node --input-type=module -e 'import { chromium } from "@playwright/test"; process.stdout.write(chromium.executablePath());')"
+          npm run preview:demo > "$RUNNER_TEMP/loft-demo.log" 2>&1 &
+          preview_pid=$!
+          trap 'kill "$preview_pid" 2>/dev/null || true' EXIT
+          export PLAYWRIGHT_BASE_URL="http://127.0.0.1:4173${NEXT_PUBLIC_BASE_PATH}/"
+          ready=0
+          for attempt in $(seq 1 30); do
+            if curl --fail --silent "$PLAYWRIGHT_BASE_URL" > /dev/null; then ready=1; break; fi
+            sleep 1
+          done
+          if [ "$ready" != "1" ]; then cat "$RUNNER_TEMP/loft-demo.log"; exit 1; fi
+          npm run test:e2e
+      - name: Audit public build
+        run: npm run audit:demo
+        env:
+          NEXT_PUBLIC_BASE_PATH: ${{ steps.pages.outputs.base_path }}
+      - name: Upload static site
+        uses: actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9 # v5
+        with:
+          path: out
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    outputs:
+      page_url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@368f82528645a54fb793d4d04e342629a3f51346 # v5
+
+  verify-published:
+    needs: deploy
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    env:
+      PLAYWRIGHT_BASE_URL: ${{ needs.deploy.outputs.page_url }}
+      ACCEPTANCE_BASE_URL: ${{ needs.deploy.outputs.page_url }}
+      NEXT_TELEMETRY_DISABLED: "1"
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
+        with:
+          node-version: "24"
+          cache: npm
+      - run: npm ci
+      - run: npx playwright install --with-deps chromium
+      - name: Verify the real public HTTPS site
+        run: |
+          export CHROMIUM_PATH="$(node --input-type=module -e 'import { chromium } from "@playwright/test"; process.stdout.write(chromium.executablePath());')"
+          ready=0
+          for attempt in $(seq 1 30); do
+            if curl --fail --silent "$PLAYWRIGHT_BASE_URL" > /dev/null; then ready=1; break; fi
+            sleep 2
+          done
+          if [ "$ready" != "1" ]; then echo "Public site not reachable"; exit 1; fi
+          npm run test:e2e
+          npm run capture:acceptance
+          npm run verify:demo
+          echo "Verified public DEMO: $PLAYWRIGHT_BASE_URL" >> "$GITHUB_STEP_SUMMARY"
+      - name: Save screenshots and verification evidence
+        if: success()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: published-demo-verification
+          path: docs/acceptance/v1.2/
+          retention-days: 7
