@@ -1,12 +1,13 @@
+import { STUDIO } from "./studio";
 import { addDays, moscowDate, type Booking } from "./availability";
 
 export const DEMO_SCENARIOS = [
   { label: "Свободный день", intervals: [] },
   { label: "Частично занят", intervals: [[12 * 60, 14 * 60], [18 * 60, 20 * 60]] },
   { label: "Бронирования подряд", intervals: [[10 * 60, 12 * 60], [12 * 60, 14 * 60], [14 * 60, 16 * 60]] },
-  { label: "Занято утро", intervals: [[7 * 60, 12 * 60]] },
-  { label: "Занят вечер", intervals: [[17 * 60, 23 * 60]] },
-  { label: "Полностью занят", intervals: [[7 * 60, 23 * 60]] },
+  { label: "Занято утро", intervals: [[STUDIO.open, 12 * 60]] },
+  { label: "Занят вечер", intervals: [[17 * 60, STUDIO.close]] },
+  { label: "Полностью занят", intervals: [[STUDIO.open, STUDIO.close]] },
 ] as const;
 
 /** Six fictional scenarios repeat across the horizon, anchored to Moscow today. */

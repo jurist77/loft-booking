@@ -50,7 +50,7 @@ test("grid cannot cross busy time and preserves adjacent intervals", async ({ pa
 
 test("closing boundary, legend, removed controls and administrator placeholder", async ({ page }) => {
   await page.goto("./"); await selectFutureDay(page, 6);
-  await expect(page.locator(".slots button")).toHaveCount(32);
+  await expect(page.locator(".slots button")).toHaveCount(28);
   await expect(page.locator("#start, #end, .booking-picker select, .demo-scenarios, .timezone-badge")).toHaveCount(0);
   await expect(page.getByText("Тестовые сценарии доступности", { exact: true })).toHaveCount(0);
   await expect(page.getByRole("group", { name: "Состояния времени" })).toHaveText("СвободноЗанятоВыбрано");

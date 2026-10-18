@@ -43,6 +43,8 @@ async function audit(folder) {
 await stat(resolve(root, ".nojekyll"));
 const html = await readFile(resolve(root, "index.html"), "utf8");
 assert.ok(html.includes("Демонстрационная версия"));
+assert.ok(html.includes("studio 19.25") && html.includes("/images/studio-19-25-logo.jpg"));
+assert.ok(!/loft\s*studio/i.test(html));
 assert.ok(html.includes('data-screen="welcome"'));
 assert.ok(!html.includes('class="calendar"') && !html.includes('class="slots"'));
 assert.ok(!html.includes("+79261234567") && !html.includes("Тест Пример"));

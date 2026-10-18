@@ -82,7 +82,7 @@ export function getSlots(date: string, bookings: readonly Booking[], now = new D
 export function validateInterval(date: string, start: number, end: number, bookings: readonly Booking[], now = new Date()): string | null {
   if (!isBookableDate(date, now)) return "Выберите дату от сегодняшнего дня до трёх месяцев вперёд.";
   if (![start, end].every(Number.isFinite) || start % STUDIO.step || end % STUDIO.step) return "Выберите время с шагом 30 минут.";
-  if (start < STUDIO.open || end > STUDIO.close) return "Студия открыта с 07:00 до 23:00.";
+  if (start < STUDIO.open || end > STUDIO.close) return `Студия открыта с ${timeLabel(STUDIO.open)} до ${timeLabel(STUDIO.close)}.`;
   if (end - start < STUDIO.minimum) return "Минимальная продолжительность аренды — 60 минут.";
   if (isPast(date, start, now)) return "Это время уже прошло. Выберите другое время начала.";
   if (bookings.some((b) => b.date === date && overlaps({ start, end }, b))) return "Это время уже занято. Выберите другой свободный интервал.";

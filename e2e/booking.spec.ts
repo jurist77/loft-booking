@@ -18,7 +18,7 @@ test("complete demo booking, gallery, time restrictions and reset", async ({ pag
   await page.getByRole("button", { name: "Закрыть описание", exact: true }).click();
   await page.getByRole("button", { name: "Забронировать", exact: true }).click();
   const date = await selectFutureDay(page, 1);
-  await expect(page.getByRole("group", { name: "Все получасовые слоты" }).getByRole("button")).toHaveCount(32);
+  await expect(page.getByRole("group", { name: "Все получасовые слоты" }).getByRole("button")).toHaveCount(28);
   await expect(slotButton(page, "18:00")).toBeDisabled();
   await slotButton(page, "16:30").click();
   await expect(page.locator(".selection-summary")).toHaveText("16:30–17:30 · 1 ч");
@@ -35,7 +35,7 @@ test("complete demo booking, gallery, time restrictions and reset", async ({ pag
   await expect(page.locator(".confirmation-details")).toContainText("16:30–18:00");
   await expect(page.locator(".confirmation-details")).toContainText("1 ч 30 мин");
   await expect(page.locator(".confirmation-details")).toContainText("Тест Пример");
-  await expect(page.locator(".confirmation-details")).toContainText("Другое");
+  await expect(page.locator(".confirmation-details")).not.toContainText("мероприятия");
   await expect(page.getByTestId("confirmation-phone")).toHaveText("+79261234567");
   await expect(page.locator(".demo-notice")).toContainText("Это демонстрация. Бронирование не создаётся, данные не сохраняются и уведомления не отправляются");
   await expect(page.locator(".confirmation .admin-contact")).toContainText("Контакт администратора появится здесь.");
@@ -54,14 +54,14 @@ test("required form fields and unavailable day", async ({ page }) => {
   await selectFutureDay(page, 5);
   await expect(page.locator(".empty-state")).toContainText("Этот день полностью занят");
   await expect(page.getByRole("button", { name: "Продолжить", exact: true })).toBeDisabled();
-  await expect(page.getByRole("group", { name: "Все получасовые слоты" }).getByRole("button", { disabled: true })).toHaveCount(32);
+  await expect(page.getByRole("group", { name: "Все получасовые слоты" }).getByRole("button", { disabled: true })).toHaveCount(28);
   await selectFutureDay(page, 1);
   await slotButton(page, "16:00").click();
   await page.getByRole("button", { name: "Продолжить", exact: true }).click();
   await page.getByRole("button", { name: "Подтвердить выбор" }).click();
   await expect(page.getByText("Укажите имя.", { exact: true })).toBeVisible();
   await expect(page.getByText("Укажите фамилию.", { exact: true })).toBeVisible();
-  await expect(page.getByText("Выберите вид мероприятия.", { exact: true })).toBeVisible();
+  await expect(page.locator("#eventType, select")).toHaveCount(0);
   await expect(page.locator("#firstName")).toBeFocused();
   await page.locator("#phone").fill("123");
   await page.getByRole("button", { name: "Подтвердить выбор" }).click();

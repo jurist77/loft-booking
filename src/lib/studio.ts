@@ -1,7 +1,9 @@
 export const STUDIO = {
-  name: "Loft Studio",
+  name: "studio 19.25",
+  tagline: "Творческое пространство",
+  logo: { src: "/images/studio-19-25-logo.jpg", width: 1280, height: 775 },
   timeZone: "Europe/Moscow",
-  open: 7 * 60,
+  open: 9 * 60,
   close: 23 * 60,
   step: 30,
   minimum: 60,
