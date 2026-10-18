@@ -2,7 +2,7 @@ name: Deploy Loft Booking DEMO to Pages
 
 on:
   push:
-    branches: [feat/booking-demo-deploy-v1.2]
+    branches: [main]
   workflow_dispatch:
 
 permissions:
@@ -14,7 +14,7 @@ concurrency:
 
 jobs:
   build:
-    if: github.ref == 'refs/heads/feat/booking-demo-deploy-v1.2'
+    if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     permissions:
       contents: read
