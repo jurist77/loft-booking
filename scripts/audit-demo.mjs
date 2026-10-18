@@ -5,6 +5,8 @@ import { createHash } from "node:crypto";
 
 const root = resolve("out");
 const basePath = process.env.NEXT_PUBLIC_BASE_PATH ?? "/loft-booking";
+const privateValues = ["DATABASE_URL", "MIGRATION_DATABASE_URL", "POSTGRES_PASSWORD", "POSTGRES_APP_PASSWORD", "POSTGRES_MIGRATION_PASSWORD"].map((key) => process.env[key]).filter((value) => value && value.length >= 8);
+try { await stat(resolve(root, "api")); throw new Error("SERVER routes must not be exported"); } catch (error) { if (error.code !== "ENOENT") throw error; }
 const secrets = [
   /-----BEGIN (?:RSA |EC |OPENSSH |DSA )?PRIVATE KEY-----/,
   /\b(?:gh[pousr]_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{20,})\b/,
@@ -24,6 +26,8 @@ async function audit(folder) {
     fingerprint.update(relative(root, file)).update(data);
     if ([".html", ".js", ".css", ".json", ".txt", ".svg"].includes(extname(file))) {
       const text = data.toString();
+      for (const value of privateValues) assert.ok(!text.includes(value), "Private environment value in public artifact (value suppressed)");
+      assert.ok(!["DATABASE_URL", "MIGRATION_DATABASE_URL", "schema_migrations", "pg_try_advisory_lock"].some((marker) => text.includes(marker)), "Server implementation leaked into public export");
       for (const rule of secrets) assert.ok(!rule.test(text), `Potential credential in ${relative(root, file)} (value suppressed)`);
       if (file.endsWith(".html")) {
         for (const match of text.matchAll(/(?:src|href)="([^"<>]+)"/g)) {

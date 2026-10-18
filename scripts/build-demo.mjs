@@ -5,6 +5,7 @@ const result = spawnSync(process.execPath, ["node_modules/next/dist/bin/next", "
   stdio: "inherit",
   env: {
     ...process.env,
+    APP_MODE: "demo",
     DEPLOY_TARGET: "pages",
     NEXT_PUBLIC_APP_MODE: "demo",
     NEXT_PUBLIC_BASE_PATH: process.env.NEXT_PUBLIC_BASE_PATH ?? "/loft-booking",

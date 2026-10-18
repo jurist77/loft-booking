@@ -4,6 +4,7 @@ import { useState, useSyncExternalStore } from "react";
 import { Welcome } from "./welcome";
 import { Booking } from "./booking";
 import { createDemoBookings } from "@/lib/demo-bookings";
+import { DEPLOYMENT } from "@/lib/deployment";
 
 const subscribe = () => () => {};
 const clientSnapshot = () => true;
@@ -20,5 +21,6 @@ function InitializedBooking() {
 
 export function BookingClient() {
   const hydrated = useSyncExternalStore(subscribe, clientSnapshot, serverSnapshot);
+  if (DEPLOYMENT.mode === "server") return <Welcome />;
   return hydrated ? <InitializedBooking /> : <><Welcome /><noscript>Для демонстрационного бронирования включите JavaScript в браузере.</noscript></>;
 }
