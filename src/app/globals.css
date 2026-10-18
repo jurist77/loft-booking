@@ -190,6 +190,10 @@ h1 em, h2 em, .closing-note em { font-weight: 400; }
 .site-footer > p { text-align: center; font-size: 9px; }
 .skip-link { position: absolute; z-index: 10; top: 8px; left: 8px; background: var(--ink); color: white; padding: 12px 20px; border-radius: 3px; transform: translateY(-150%); }
 .skip-link:focus { transform: none; }
+.demo-banner { display: flex; justify-content: center; align-items: center; flex-wrap: wrap; gap: 4px 16px; padding: 9px 20px; background: #eaeade; color: #45533b; font-size: 11px; text-align: center; }
+.demo-banner strong { font-weight: 600; }
+.demo-warning { padding: 14px 16px; border: 1px solid #dfd9c5; border-radius: 4px; background: #f2ecde; color: #43513e; font-size: 12px; line-height: 1.8; margin-top: 20px; }
+.booking-loading { padding-block: 60px; color: #69735f; }
 .home-admin { padding-bottom: 35px; }
 .admin-contact { padding-top: 22px; border-top: 1px solid var(--line); text-align: left; }
 .admin-contact h3 { font: 500 13px/1.5 Arial, sans-serif; margin: 0 0 5px; }

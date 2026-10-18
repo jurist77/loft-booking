@@ -2,7 +2,7 @@ import { expect, test } from "@playwright/test";
 import { selectFutureDay, slotButton } from "./flows";
 
 test("grid expands, shortens and resets with mouse and keyboard", async ({ page }) => {
-  await page.goto("/");
+  await page.goto("./");
   await selectFutureDay(page, 6);
   const summary = page.locator(".selection-summary");
   await slotButton(page, "10:00").focus();
@@ -32,7 +32,7 @@ test("grid expands, shortens and resets with mouse and keyboard", async ({ page 
 });
 
 test("grid cannot cross busy time and preserves adjacent intervals", async ({ page }) => {
-  await page.goto("/"); await selectFutureDay(page, 1);
+  await page.goto("./"); await selectFutureDay(page, 1);
   await expect(slotButton(page, "11:30")).toBeDisabled();
   await slotButton(page, "10:00").click(); await slotButton(page, "11:30").click();
   await expect(page.locator(".selection-summary")).toHaveText("10:00–12:00 · 2 ч");
@@ -49,7 +49,7 @@ test("grid cannot cross busy time and preserves adjacent intervals", async ({ pa
 });
 
 test("closing boundary, legend, removed controls and administrator placeholder", async ({ page }) => {
-  await page.goto("/"); await selectFutureDay(page, 6);
+  await page.goto("./"); await selectFutureDay(page, 6);
   await expect(page.locator(".slots button")).toHaveCount(32);
   await expect(page.locator("#start, #end, .booking-picker select, .demo-scenarios, .timezone-badge")).toHaveCount(0);
   await expect(page.getByText("Тестовые сценарии доступности", { exact: true })).toHaveCount(0);

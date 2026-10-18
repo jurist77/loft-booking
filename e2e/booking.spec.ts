@@ -5,7 +5,7 @@ test("complete demo booking, gallery, time restrictions and reset", async ({ pag
   const errors: string[] = [];
   page.on("pageerror", (error) => errors.push(error.message));
   page.on("console", (message) => { if (message.type() === "error") errors.push(message.text()); });
-  await page.goto("/");
+  await page.goto("./");
   await expect(page.getByRole("heading", { level: 1 })).toContainText("Место для");
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
   await page.getByRole("button", { name: "Открыть изображение: Общее пространство", exact: true }).click();
@@ -35,7 +35,7 @@ test("complete demo booking, gallery, time restrictions and reset", async ({ pag
   await expect(page.locator(".confirmation-details")).toContainText("Тест Пример");
   await expect(page.locator(".confirmation-details")).toContainText("Другое");
   await expect(page.getByTestId("confirmation-phone")).toHaveText("+79261234567");
-  await expect(page.locator(".demo-notice")).toContainText("Демонстрационный режим. Бронирование пока не сохраняется");
+  await expect(page.locator(".demo-notice")).toContainText("Это демонстрация. Бронирование не создаётся, данные не сохраняются и уведомления не отправляются");
   await expect(page.locator(".confirmation .admin-contact")).toContainText("Контакт администратора появится здесь.");
   await page.getByRole("button", { name: "Новое бронирование" }).click();
   await expect(page.locator(".selection-summary")).toHaveText("Время пока не выбрано");
@@ -47,7 +47,7 @@ test("complete demo booking, gallery, time restrictions and reset", async ({ pag
 });
 
 test("required form fields and unavailable day", async ({ page }) => {
-  await page.goto("/");
+  await page.goto("./");
   await selectFutureDay(page, 5);
   await expect(page.locator(".empty-state")).toContainText("Этот день полностью занят");
   await expect(page.getByRole("button", { name: "Продолжить", exact: true })).toBeDisabled();
@@ -68,7 +68,7 @@ test("required form fields and unavailable day", async ({ page }) => {
 });
 
 test("calendar navigation respects the booking horizon", async ({ page }) => {
-  await page.goto("/");
+  await page.goto("./");
   await expect(page.getByRole("button", { name: "Предыдущий месяц" })).toBeDisabled();
   for (let i = 0; i < 3; i++) await page.getByRole("button", { name: "Следующий месяц" }).click();
   await expect(page.getByRole("button", { name: "Следующий месяц" })).toBeDisabled();

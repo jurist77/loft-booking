@@ -11,6 +11,7 @@ import { Confirmation } from "./confirmation";
 import { TimeGrid } from "./time-grid";
 import { ArrowIcon } from "./icons";
 import { AdminContact } from "./admin-contact";
+import { DEMO_WARNING } from "@/lib/demo";
 
 const EMPTY_CONTACT: ContactInput = { firstName: "", lastName: "", phone: "", eventType: "" };
 
@@ -116,6 +117,7 @@ export function Booking({ initialNow, initialBookings }: { initialNow: string; i
       <div className="contact-panel"><div className="step-heading"><span className="step-number">02</span><h3 tabIndex={-1} ref={contactHeadingRef}>Контактные данные</h3></div>
         <p className="contact-caption">Это демонстрационная форма. Используйте только вымышленные данные. Не вводите реальные контакты.</p>
         <ContactForm value={contact} errors={errors} onChange={setContact} />
+        <p className="demo-warning" role="note">{DEMO_WARNING}</p>
         {error && <div className="form-error" role="alert" ref={errorRef} tabIndex={-1}>{error}</div>}
         <button className="button button-dark submit-button" type="submit" disabled={busy}>{busy ? "Проверяем доступность…" : "Подтвердить выбор"}<span aria-hidden="true"><ArrowIcon /></span></button>
         <p className="demo-caption">Демонстрационный режим · без сохранения и уведомлений</p>

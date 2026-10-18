@@ -1,0 +1,27 @@
+{
+  "version": "1.2",
+  "testedURL": "http://127.0.0.1:4173/loft-booking/",
+  "capturedAt": "2026-10-18T09:09:28.400Z",
+  "browser": "154.0.8037.57",
+  "screenshots": [
+    "01-home-desktop.png",
+    "02-home-mobile.png",
+    "03-busy-grid.png",
+    "04-one-hour.png",
+    "05-two-and-half-hours.png",
+    "06-contact-form.png",
+    "07-your-booking.png"
+  ],
+  "checks": {
+    "mobileOverflow": false,
+    "slots": 32,
+    "busyStruckThroughAndDisabled": 8,
+    "noTimeDropdownsOrDemoControls": true,
+    "firstSelection": "10:00–11:00 · 1 ч",
+    "extendedSelection": "10:00–12:30 · 2 ч 30 мин",
+    "phoneNormalized": true,
+    "noCheckboxOrNotificationChoice": true,
+    "adminPlaceholder": true,
+    "clientErrors": []
+  }
+}

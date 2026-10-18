@@ -5,6 +5,7 @@ import { durationLabel, formatDate, timeLabel } from "@/lib/availability";
 import type { Confirmation as ConfirmationData } from "@/lib/booking-service";
 import { ArrowIcon } from "./icons";
 import { AdminContact } from "./admin-contact";
+import { DEMO_WARNING } from "@/lib/demo";
 
 export function Confirmation({ value, onBack }: { value: ConfirmationData; onBack: () => void }) {
   const title = useRef<HTMLHeadingElement>(null);
@@ -21,7 +22,7 @@ export function Confirmation({ value, onBack }: { value: ConfirmationData; onBac
       <div><dt>Контактный телефон</dt><dd data-testid="confirmation-phone">{value.contact.phone}</dd></div>
       <div><dt>Тип мероприятия</dt><dd>{value.contact.eventType}</dd></div>
     </dl>
-    <div className="demo-notice"><strong>Демонстрационный режим. Бронирование пока не сохраняется</strong><p>Студия не зарезервирована. Уведомления не отправляются. Данные отображаются только в этой вкладке до нового бронирования или закрытия страницы.</p></div>
+    <div className="demo-notice"><strong>{DEMO_WARNING}</strong><p>Данные отображаются только в этой вкладке до нового бронирования или закрытия страницы.</p></div>
     <button className="button button-dark" type="button" onClick={onBack}>Новое бронирование <span aria-hidden="true"><ArrowIcon /></span></button>
     <AdminContact />
   </section>;

@@ -11,7 +11,11 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "test:e2e": "playwright test",
-    "capture:acceptance": "node scripts/capture-acceptance.mjs"
+    "capture:acceptance": "node scripts/capture-acceptance.mjs",
+    "build:demo": "node scripts/build-demo.mjs",
+    "preview:demo": "node scripts/serve-demo.mjs",
+    "audit:demo": "node scripts/audit-demo.mjs",
+    "verify:demo": "node scripts/verify-demo.mjs"
   },
   "engines": {
     "node": "^22.12.0 || ^24.0.0 || >=26.0.0"

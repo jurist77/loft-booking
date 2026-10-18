@@ -4,11 +4,11 @@ import { chromium, expect } from "@playwright/test";
 import { fillDemoContact, selectFutureDay, slotButton } from "../e2e/flows.ts";
 
 const baseURL = process.env.ACCEPTANCE_BASE_URL || "http://127.0.0.1:3000";
-const output = new URL("../docs/acceptance/v1.1/", import.meta.url);
+const output = new URL("../docs/acceptance/v1.2/", import.meta.url);
 await mkdir(output, { recursive: true });
 const browser = await chromium.launch({ executablePath: process.env.CHROMIUM_PATH || "/usr/bin/chromium" });
 const clientErrors = [];
-const results = { version: "1.1", capturedAt: new Date().toISOString(), browser: browser.version(), screenshots: [], checks: {} };
+const results = { version: "1.2", testedURL: baseURL, capturedAt: new Date().toISOString(), browser: browser.version(), screenshots: [], checks: {} };
 
 async function capture(locator, name, options = {}) {
   await locator.screenshot({ ...options, path: new URL(name, output).pathname, animations: "disabled" });
@@ -73,7 +73,7 @@ try {
   await expect(desktop.locator(".confirmation-details")).toContainText("2 ч 30 мин");
   await expect(desktop.locator(".confirmation-details")).toContainText("Тест Пример");
   await expect(desktop.getByTestId("confirmation-phone")).toHaveText("+79261234567");
-  await expect(desktop.locator(".demo-notice")).toContainText("Демонстрационный режим. Бронирование пока не сохраняется");
+  await expect(desktop.locator(".demo-notice")).toContainText("Это демонстрация. Бронирование не создаётся, данные не сохраняются и уведомления не отправляются");
   await capture(desktop.locator(".confirmation"), "07-your-booking.png", { mask: [desktop.getByTestId("confirmation-phone")], maskColor: "#eaeade" });
   results.checks.phoneNormalized = true; results.checks.noCheckboxOrNotificationChoice = true;
   results.checks.adminPlaceholder = true;
