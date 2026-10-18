@@ -4,6 +4,7 @@ import { Gallery } from "@/components/gallery";
 import { createDemoBookings } from "@/lib/demo-bookings";
 import { ArrowIcon, SparkIcon } from "@/components/icons";
 import { STUDIO } from "@/lib/studio";
+import { AdminContact } from "@/components/admin-contact";
 
 // Booking dates must be calculated at request time rather than at build time.
 export const dynamic = "force-dynamic";
@@ -18,6 +19,7 @@ export default function Home() {
       <div className="occasion-strip section-shell"><span>Здесь есть место для</span><p>дней рождения <i><SparkIcon /></i> уютных встреч <i><SparkIcon /></i> творческих идей <i><SparkIcon /></i> ваших историй</p></div>
       <section className="space-section section-shell" id="space" aria-labelledby="space-heading"><div className="section-heading"><div><p className="eyebrow">Почувствуйте атмосферу</p><h2 id="space-heading">Больше, чем <em>просто стены.</em></h2></div><p>{STUDIO.description}</p></div><Gallery /><p className="photo-disclaimer"><span aria-hidden="true">*</span> Пока здесь 4 временные иллюстрации. Реальные фотографии студии необходимо добавить перед запуском.</p></section>
       <section className="details-section section-shell" id="details" aria-labelledby="details-heading"><div className="details-card"><div className="details-intro"><span className="detail-spark" aria-hidden="true"><SparkIcon /></span><p className="eyebrow">Всё начинается с комфорта</p><h2 id="details-heading">Устраивайтесь.<br />Здесь <em>вам рады.</em></h2><p>Мы оставили главное: пространство для общения и время, которое не хочется торопить.</p></div><div className="details-list"><article><span className="detail-number">01</span><div><h3>Ваш ритм</h3><p>Каждый день с 07:00 до 23:00.<br />Аренда от часа, дальше — с шагом 30 минут.</p></div></article><article><span className="detail-number">02</span><div><h3>Ваша точка встречи</h3><p>{STUDIO.address}.<br /><span className="temporary-label">Временное описание адреса</span></p></div></article><article><span className="detail-number">03</span><div><h3>Простые договорённости</h3><p>Бережно относитесь к пространству и уважайте соседей. Формат события и дополнительные условия уточняются со студией.</p><span className="temporary-label">Предварительные правила аренды</span></div></article></div></div></section>
+      <div className="section-shell home-admin"><AdminContact /></div>
       <Booking initialNow={now.toISOString()} initialBookings={createDemoBookings(now)} />
       <section className="closing-note section-shell"><span aria-hidden="true"><SparkIcon /></span><p>Лучшие моменты — те,<br />что мы <em>проводим вместе.</em></p><a href="#booking" aria-label="Перейти к бронированию"><ArrowIcon /></a></section>
     </main>

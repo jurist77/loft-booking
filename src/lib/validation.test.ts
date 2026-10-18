@@ -17,8 +17,8 @@ describe("Contact validation", () => {
     expect(validateContact(validContact)).toEqual({ errors: {}, phone: "+79261234567" });
   });
   it("reports all missing required fields", () => {
-    const result = validateContact({ firstName: " ", lastName: "", phone: "", eventType: "", channel: "", consent: false });
-    expect(Object.keys(result.errors).sort()).toEqual(["channel", "consent", "eventType", "firstName", "lastName", "phone"]);
+    const result = validateContact({ firstName: " ", lastName: "", phone: "", eventType: "" });
+    expect(Object.keys(result.errors).sort()).toEqual(["eventType", "firstName", "lastName", "phone"]);
   });
   it.each(["Анна-Мария", "O’Connor", "Иван Петров", "Anna"])("accepts name %s", (name) => {
     expect(validateContact({ ...validContact, firstName: name }).errors.firstName).toBeUndefined();
@@ -30,5 +30,10 @@ describe("Contact validation", () => {
     const { errors } = validateContact({ ...validContact, eventType: "unknown", channel: "Email" });
     expect(errors.eventType).toBeDefined(); expect(errors.channel).toBeDefined();
   });
-  it("requires explicit consent", () => { expect(validateContact({ ...validContact, consent: false }).errors.consent).toBeDefined(); });
+  it("accepts the demo form without hidden notification or consent requirements and never invents consent", () => {
+    const input: ContactInput = { firstName: "Тест", lastName: "Пример", phone: "9261234567", eventType: "Другое" };
+    expect(validateContact(input).errors).toEqual({});
+    expect(input).not.toHaveProperty("consent");
+    expect(input).not.toHaveProperty("channel");
+  });
 });

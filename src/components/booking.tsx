@@ -1,24 +1,26 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
-import { addDays, availableEnds, availableStarts, defaultEnd, durationLabel, formatDate, getSlots, moscowDate, timeLabel, validateInterval, type Booking as BookingData } from "@/lib/availability";
+import { useEffect, useRef, useState } from "react";
+import { durationLabel, formatDate, moscowDate, timeLabel, validateInterval, type Booking as BookingData } from "@/lib/availability";
 import { demoBookingService, type Confirmation as ConfirmationData } from "@/lib/booking-service";
-import { DEMO_SCENARIOS, scenarioForDate } from "@/lib/demo-bookings";
+import { selectSlot, type RentalSelection } from "@/lib/selection";
 import { validateContact, type ContactErrors, type ContactInput } from "@/lib/validation";
 import { Calendar } from "./calendar";
 import { ContactForm } from "./contact-form";
 import { Confirmation } from "./confirmation";
+import { TimeGrid } from "./time-grid";
 import { ArrowIcon } from "./icons";
+import { AdminContact } from "./admin-contact";
 
-const EMPTY_CONTACT: ContactInput = { firstName: "", lastName: "", phone: "", eventType: "", channel: "", consent: false };
+const EMPTY_CONTACT: ContactInput = { firstName: "", lastName: "", phone: "", eventType: "" };
 
 export function Booking({ initialNow, initialBookings }: { initialNow: string; initialBookings: BookingData[] }) {
   const [now, setNow] = useState(() => new Date(initialNow));
   const [date, setDate] = useState(() => moscowDate(new Date(initialNow)));
   const [month, setMonth] = useState(() => date.slice(0, 7));
   const [bookings, setBookings] = useState(initialBookings);
-  const [start, setStart] = useState<number | "">("");
-  const [end, setEnd] = useState<number | "">("");
+  const [selection, setSelection] = useState<RentalSelection | null>(null);
+  const [step, setStep] = useState<"time" | "contact">("time");
   const [contact, setContact] = useState<ContactInput>(EMPTY_CONTACT);
   const [errors, setErrors] = useState<ContactErrors>({});
   const [error, setError] = useState("");
@@ -27,7 +29,9 @@ export function Booking({ initialNow, initialBookings }: { initialNow: string; i
   const formRef = useRef<HTMLFormElement>(null);
   const errorRef = useRef<HTMLDivElement>(null);
   const headingRef = useRef<HTMLHeadingElement>(null);
+  const contactHeadingRef = useRef<HTMLHeadingElement>(null);
   const today = moscowDate(now);
+  const validSelection = selection && !validateInterval(date, selection.start, selection.end, bookings, now) ? selection : null;
 
   useEffect(() => {
     const timer = setInterval(() => setNow(new Date()), 15000);
@@ -39,15 +43,31 @@ export function Booking({ initialNow, initialBookings }: { initialNow: string; i
     return () => { active = false; };
   }, [today]);
 
-  const slots = useMemo(() => getSlots(date, bookings, now), [date, bookings, now]);
-  const starts = useMemo(() => availableStarts(date, bookings, now), [date, bookings, now]);
-  const validStart = start !== "" && starts.includes(start) ? start : "";
-  const ends = useMemo(() => validStart === "" ? [] : availableEnds(date, validStart, bookings, now), [date, validStart, bookings, now]);
-  const validEnd = end !== "" && ends.includes(end) ? end : "";
-
-  function selectDate(next: string) { setDate(next); setMonth(next.slice(0, 7)); setStart(""); setEnd(""); setError(""); }
-  function selectStart(value: number | "") { setStart(value); setEnd(value === "" ? "" : defaultEnd(value)); setError(""); }
-
+  function focusHeading(ref: React.RefObject<HTMLHeadingElement | null>) {
+    requestAnimationFrame(() => { ref.current?.focus(); ref.current?.scrollIntoView({ behavior: window.matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth", block: "start" }); });
+  }
+  function selectDate(next: string) {
+    if (next === date) return;
+    setDate(next); setMonth(next.slice(0, 7)); setSelection(null); setError("");
+  }
+  function chooseSlot(slot: number) {
+    const current = new Date();
+    const previous = selection && !validateInterval(date, selection.start, selection.end, bookings, current) ? selection : null;
+    const change = selectSlot(date, slot, previous, bookings, current);
+    setNow(current); setSelection(change.selection); setError(change.error || "");
+  }
+  function continueToContact() {
+    const current = new Date();
+    const problem = selection ? validateInterval(date, selection.start, selection.end, bookings, current) : "Выберите время аренды.";
+    setNow(current);
+    if (problem) { setError(problem); return; }
+    setError(""); setStep("contact"); focusHeading(contactHeadingRef);
+  }
+  function newBooking() {
+    const current = new Date(); const next = moscowDate(current);
+    setConfirmation(null); setContact(EMPTY_CONTACT); setErrors({}); setSelection(null);
+    setDate(next); setMonth(next.slice(0, 7)); setNow(current); setError(""); setStep("time"); focusHeading(headingRef);
+  }
   async function submit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (busy) return;
@@ -55,53 +75,50 @@ export function Booking({ initialNow, initialBookings }: { initialNow: string; i
     setNow(current);
     const checked = validateContact(contact);
     setErrors(checked.errors);
-    const intervalError = validStart === "" || validEnd === "" ? "Выберите свободное время начала и окончания аренды." : validateInterval(date, validStart, validEnd, bookings, current);
+    const intervalError = selection ? validateInterval(date, selection.start, selection.end, bookings, current) : "Вернитесь к календарю и выберите время.";
     if (intervalError || Object.keys(checked.errors).length) {
       setError(intervalError || "Проверьте отмеченные поля формы.");
-      if (Object.keys(checked.errors).length) requestAnimationFrame(() => formRef.current?.querySelector<HTMLElement>('[aria-invalid="true"]')?.focus());
-      else requestAnimationFrame(() => errorRef.current?.focus());
+      requestAnimationFrame(() => {
+        if (Object.keys(checked.errors).length) formRef.current?.querySelector<HTMLElement>('[aria-invalid="true"]')?.focus();
+        else errorRef.current?.focus();
+      });
       return;
     }
     setBusy(true); setError("");
     try {
-      const value = await demoBookingService.confirm({ date, start: validStart as number, end: validEnd as number, contact: { ...contact, phone: checked.phone! } }, current);
+      const value = await demoBookingService.confirm({ date, ...selection!, contact: { ...contact, phone: checked.phone! } }, current);
       setConfirmation(value); setContact(EMPTY_CONTACT); setErrors({});
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "Не удалось проверить интервал. Попробуйте ещё раз.");
-      try { setBookings(await demoBookingService.getBookings(new Date())); } catch { /* Keep the previous snapshot and the visible error. */ }
+      try { setBookings(await demoBookingService.getBookings(new Date())); } catch { /* Preserve the visible error and the last snapshot. */ }
       requestAnimationFrame(() => errorRef.current?.focus());
     } finally { setBusy(false); }
   }
 
+  const chosenDetails = selection && <dl className="chosen-details">
+    <div><dt>Дата аренды</dt><dd>{formatDate(date, { day: "numeric", month: "long", year: "numeric" })}</dd></div>
+    <div><dt>Время аренды</dt><dd>{timeLabel(selection.start)}–{timeLabel(selection.end)}</dd></div>
+    <div><dt>Продолжительность</dt><dd>{durationLabel(selection.end - selection.start)}</dd></div>
+  </dl>;
+
   return <section id="booking" className="booking-section section-shell" aria-labelledby="booking-heading">
-    <div className="section-heading booking-intro"><div><p className="eyebrow">Ваше время, ваше пространство</p><h2 id="booking-heading" ref={headingRef} tabIndex={-1}>Давайте запланируем<br /><em>что-то хорошее.</em></h2></div><p>Выберите удобный день и время.<br />Всё остальное начинается с вашей идеи.</p></div>
-    {confirmation ? <Confirmation value={confirmation} onBack={() => { setConfirmation(null); selectDate(moscowDate(new Date())); setNow(new Date()); requestAnimationFrame(() => headingRef.current?.focus()); }} /> : <form className="booking-card" onSubmit={submit} noValidate ref={formRef}>
-      <div className="date-time-panel">
-        <div className="step-heading"><span className="step-number">01</span><h3>Когда встретимся?</h3><span className="timezone-badge">МСК · UTC+3</span></div>
-        <Calendar month={month} selected={date} now={now} bookings={bookings} onMonth={setMonth} onSelect={selectDate} />
-        <div className="time-section"><div className="time-heading"><h4>{formatDate(date, { day: "numeric", month: "long", weekday: "short" })}</h4><span className="availability-label">{scenarioForDate(date, now)}</span></div>
-          <div className="slot-legend"><span><i className="legend-free" />Свободно</span><span><i className="legend-busy" />Занято</span><span><i className="legend-selected" />Ваше время</span></div>
-          <div className="slots" role="group" aria-label="Все получасовые слоты">
-            {slots.map((slot) => {
-              const available = starts.includes(slot.start);
-              const selected = validStart !== "" && validEnd !== "" && slot.start >= validStart && slot.start < validEnd;
-              const status = slot.busy ? "занято" : slot.past ? "время прошло" : !available ? "недостаточно свободного времени для часа аренды" : "свободно";
-              return <button type="button" className={`slot ${slot.busy ? "busy-slot" : ""} ${selected ? "selected-slot" : ""}`} key={slot.start} disabled={!available} aria-label={`${timeLabel(slot.start)} — ${status}`} aria-pressed={selected} title={`${timeLabel(slot.start)}–${timeLabel(slot.start + 30)}: ${status}`} onClick={() => selectStart(slot.start)}>{timeLabel(slot.start)}</button>;
-            })}
-          </div>
-          <div className="field-pair time-selects"><label className="field" htmlFor="start">Начало<select id="start" value={validStart} onChange={(e) => selectStart(e.target.value === "" ? "" : Number(e.target.value))} required disabled={!starts.length}><option value="">{starts.length ? "Выберите время" : "Нет доступного времени"}</option>{starts.map((value) => <option key={value} value={value}>{timeLabel(value)}</option>)}</select></label>
-            <label className="field" htmlFor="end">Окончание<select id="end" value={validEnd} onChange={(e) => setEnd(Number(e.target.value))} required disabled={validStart === ""}><option value="" disabled>Сначала начало</option>{ends.map((value) => <option key={value} value={value}>{timeLabel(value)}</option>)}</select></label></div>
-          {!starts.length && <p className="empty-state" role="status">{slots.every((s) => s.busy) ? "Этот день полностью занят." : "На этот день не осталось свободного часа."} Выберите другую дату.</p>}
-          <p className="field-hint">Минимум 1 час · шаг 30 минут · открыто 07:00–23:00</p>
-        </div>
-        <details className="demo-scenarios"><summary>Тестовые сценарии доступности</summary><p>Вымышленные бронирования для проверки прототипа:</p><div>{DEMO_SCENARIOS.map((scenario, offset) => <button type="button" key={scenario.label} onClick={() => selectDate(addDays(today, offset))}>{scenario.label}<span>{formatDate(addDays(today, offset))}</span></button>)}</div></details>
+    <div className="section-heading booking-intro"><div><p className="eyebrow">Ваше время, ваше пространство</p><h2 id="booking-heading" ref={headingRef} tabIndex={-1}>Давайте запланируем<br /><em>что-то хорошее.</em></h2></div><p>Выберите день и отметьте время в сетке.<br />Всё остальное начинается с вашей идеи.</p></div>
+    {confirmation ? <Confirmation value={confirmation} onBack={newBooking} /> : step === "time" ? <div className="booking-card booking-picker">
+      <div className="date-time-panel"><div className="step-heading"><span className="step-number">01</span><h3>Когда встретимся?</h3></div>
+        <div className="booking-columns"><Calendar month={month} selected={date} now={now} bookings={bookings} onMonth={setMonth} onSelect={selectDate} />
+          <TimeGrid date={date} now={now} bookings={bookings} selection={validSelection} onSlot={chooseSlot} onReset={() => { setSelection(null); setError(""); }} /></div>
+        {error && <div className="form-error" role="alert">{error}</div>}
+        <div className="picker-footer"><p>От 1 часа · шаг 30 минут</p><button className="button button-dark" type="button" disabled={!validSelection} onClick={continueToContact}>Продолжить <span aria-hidden="true"><ArrowIcon /></span></button></div>
+        <AdminContact />
       </div>
-      <div className="contact-panel"><div className="step-heading"><span className="step-number">02</span><h3>Немного о вас</h3></div><p className="contact-caption">Чтобы у вашей встречи появилось имя.<br />Все поля обязательны.</p>
+    </div> : <form className="booking-card contact-step" onSubmit={submit} noValidate ref={formRef}>
+      <div className="booking-side-summary"><p className="eyebrow">Ваш выбор</p>{chosenDetails}<button type="button" className="text-button" disabled={busy} onClick={() => { setStep("time"); setError(""); focusHeading(headingRef); }}>← Изменить дату или время</button><AdminContact /></div>
+      <div className="contact-panel"><div className="step-heading"><span className="step-number">02</span><h3 tabIndex={-1} ref={contactHeadingRef}>Контактные данные</h3></div>
+        <p className="contact-caption">Это демонстрационная форма. Используйте только вымышленные данные. Не вводите реальные контакты.</p>
         <ContactForm value={contact} errors={errors} onChange={setContact} />
-        <div className="booking-summary" aria-live="polite"><span>{formatDate(date)}{validStart !== "" && validEnd !== "" ? ` · ${timeLabel(validStart)}–${timeLabel(validEnd)}` : " · время не выбрано"}</span><strong>{validStart !== "" && validEnd !== "" ? durationLabel(validEnd - validStart) : "От 1 часа"}</strong></div>
         {error && <div className="form-error" role="alert" ref={errorRef} tabIndex={-1}>{error}</div>}
         <button className="button button-dark submit-button" type="submit" disabled={busy}>{busy ? "Проверяем доступность…" : "Подтвердить выбор"}<span aria-hidden="true"><ArrowIcon /></span></button>
-        <p className="demo-caption">Демонстрация · без оплаты и реального бронирования</p>
+        <p className="demo-caption">Демонстрационный режим · без сохранения и уведомлений</p>
       </div>
     </form>}
   </section>;

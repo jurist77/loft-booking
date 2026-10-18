@@ -1,20 +1,19 @@
 import assert from "node:assert/strict";
 import { mkdir, writeFile } from "node:fs/promises";
 import { chromium, expect } from "@playwright/test";
-import { fillDemoContact, triggerAvailabilityConflict } from "../e2e/flows.ts";
+import { fillDemoContact, selectFutureDay, slotButton } from "../e2e/flows.ts";
 
 const baseURL = process.env.ACCEPTANCE_BASE_URL || "http://127.0.0.1:3000";
-const output = new URL("../docs/acceptance/", import.meta.url);
+const output = new URL("../docs/acceptance/v1.1/", import.meta.url);
 await mkdir(output, { recursive: true });
 const browser = await chromium.launch({ executablePath: process.env.CHROMIUM_PATH || "/usr/bin/chromium" });
 const clientErrors = [];
-const results = { capturedAt: new Date().toISOString(), browser: browser.version(), screenshots: [], checks: {} };
+const results = { version: "1.1", capturedAt: new Date().toISOString(), browser: browser.version(), screenshots: [], checks: {} };
 
 async function capture(locator, name, options = {}) {
   await locator.screenshot({ ...options, path: new URL(name, output).pathname, animations: "disabled" });
   results.screenshots.push(name);
 }
-
 async function pageFor(viewport, mobile = false) {
   const page = await browser.newPage({ viewport, isMobile: mobile, hasTouch: mobile, reducedMotion: "reduce" });
   page.on("pageerror", (error) => clientErrors.push(error.message));
@@ -29,7 +28,6 @@ async function pageFor(viewport, mobile = false) {
   assert.equal(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth), false);
   return page;
 }
-
 try {
   const desktop = await pageFor({ width: 1440, height: 1000 });
   await capture(desktop, "01-home-desktop.png", { fullPage: true });
@@ -38,52 +36,48 @@ try {
   results.checks.mobileOverflow = false;
   await mobile.close();
 
-  await desktop.getByText("Тестовые сценарии доступности", { exact: true }).click();
-  await desktop.getByRole("button", { name: /^Частично занят/ }).click();
-  const slots = desktop.getByRole("group", { name: "Все получасовые слоты" }).getByRole("button");
-  await expect(slots).toHaveCount(32);
-  const busySlots = desktop.locator(".slot.busy-slot");
+  await selectFutureDay(desktop, 1);
+  await expect(desktop.locator(".slots button")).toHaveCount(32);
+  const busySlots = desktop.locator(".busy-slot");
   await expect(busySlots).toHaveCount(8);
   for (const slot of await busySlots.all()) {
     await expect(slot).toBeDisabled();
-    assert.match(await slot.evaluate((element) => getComputedStyle(element).textDecorationLine), /line-through/);
+    await expect(slot).toHaveCSS("text-decoration-line", "line-through");
   }
-  results.checks.slots = 32;
-  results.checks.busySlotsStruckThroughAndDisabled = 8;
-  await capture(desktop.locator(".date-time-panel"), "03-calendar-busy.png");
+  await expect(desktop.locator("#start, #end, .booking-picker select, .demo-scenarios, .timezone-badge")).toHaveCount(0);
+  await expect(desktop.locator(".slot-legend")).toHaveText("СвободноЗанятоВыбрано");
+  results.checks.slots = 32; results.checks.busyStruckThroughAndDisabled = 8;
+  results.checks.noTimeDropdownsOrDemoControls = true;
+  await capture(desktop.locator(".booking-picker"), "03-busy-grid.png");
 
-  const start = desktop.getByRole("combobox", { name: "Начало", exact: true });
-  for (const value of [690, 720, 750, 780, 810, 1050, 1080, 1110, 1140, 1170, 1350]) {
-    await expect(start.locator(`option[value="${value}"]`)).toHaveCount(0);
-  }
-  await start.selectOption("990");
-  const end = desktop.getByRole("combobox", { name: "Окончание", exact: true });
-  await expect(end).toHaveValue("1050");
-  await expect(end.locator("option:not([disabled])")).toHaveText(["17:30", "18:00"]);
-  results.checks.automaticEnd = "16:30 → 17:30";
-  results.checks.allowedEnds = ["17:30", "18:00"];
-  await capture(desktop.locator(".date-time-panel"), "04-time-selection.png");
-  await end.selectOption("1080");
+  await selectFutureDay(desktop, 6);
+  await slotButton(desktop, "10:00").click();
+  await expect(desktop.locator(".selection-summary")).toHaveText("10:00–11:00 · 1 ч");
+  await expect(desktop.locator('.slot[aria-pressed="true"]')).toHaveCount(2);
+  results.checks.firstSelection = "10:00–11:00 · 1 ч";
+  await capture(desktop.locator(".booking-picker"), "04-one-hour.png");
+  await slotButton(desktop, "12:00").click();
+  await expect(desktop.locator(".selection-summary")).toHaveText("10:00–12:30 · 2 ч 30 мин");
+  await expect(desktop.locator('.slot[aria-pressed="true"]')).toHaveCount(5);
+  results.checks.extendedSelection = "10:00–12:30 · 2 ч 30 мин";
+  await capture(desktop.locator(".booking-picker"), "05-two-and-half-hours.png");
+
+  await desktop.getByRole("button", { name: "Продолжить", exact: true }).click();
   await fillDemoContact(desktop);
-  // The screenshot keeps the phone field masked; the actual input remains valid.
-  await capture(desktop.locator(".contact-panel"), "05-booking-form.png", { mask: [desktop.locator("#phone")], maskColor: "#eaeade" });
+  await expect(desktop.locator('input[type="checkbox"], input[type="radio"]')).toHaveCount(0);
+  await expect(desktop.locator(".contact-step .admin-contact")).toContainText("Контакт администратора появится здесь.");
+  await capture(desktop.locator(".contact-step"), "06-contact-form.png", { mask: [desktop.locator("#phone")], maskColor: "#eaeade" });
   await desktop.getByRole("button", { name: "Подтвердить выбор" }).click();
-  await expect(desktop.locator(".confirmation-details")).toContainText("16:30–18:00");
-  await expect(desktop.locator(".confirmation-details")).toContainText("1 ч 30 мин");
-  await expect(desktop.locator(".demo-notice")).toContainText("Бронирование фактически не сохранено");
-  await capture(desktop.locator(".confirmation"), "06-demo-confirmation.png");
-  await desktop.close();
-
-  const conflict = await browser.newPage({ viewport: { width: 1440, height: 1000 }, reducedMotion: "reduce" });
-  conflict.on("pageerror", (error) => clientErrors.push(error.message));
-  await triggerAvailabilityConflict(conflict, baseURL);
-  await capture(conflict.locator(".booking-card"), "07-time-conflict.png", { mask: [conflict.locator("#phone")], maskColor: "#eaeade" });
-  results.checks.conflictMessage = await conflict.locator(".form-error").innerText();
-  await conflict.close();
-  assert.deepEqual(clientErrors, []);
-  results.checks.clientErrors = clientErrors;
+  await expect(desktop.getByRole("heading", { name: "Ваше бронирование", exact: true })).toBeVisible();
+  await expect(desktop.locator(".confirmation-details")).toContainText("10:00–12:30");
+  await expect(desktop.locator(".confirmation-details")).toContainText("2 ч 30 мин");
+  await expect(desktop.locator(".confirmation-details")).toContainText("Тест Пример");
+  await expect(desktop.getByTestId("confirmation-phone")).toHaveText("+79261234567");
+  await expect(desktop.locator(".demo-notice")).toContainText("Демонстрационный режим. Бронирование пока не сохраняется");
+  await capture(desktop.locator(".confirmation"), "07-your-booking.png", { mask: [desktop.getByTestId("confirmation-phone")], maskColor: "#eaeade" });
+  results.checks.phoneNormalized = true; results.checks.noCheckboxOrNotificationChoice = true;
+  results.checks.adminPlaceholder = true;
+  assert.deepEqual(clientErrors, []); results.checks.clientErrors = clientErrors;
   await writeFile(new URL("checks.json", output), JSON.stringify(results, null, 2) + "\n");
   console.log(JSON.stringify(results, null, 2));
-} finally {
-  await browser.close();
-}
+} finally { await browser.close(); }
