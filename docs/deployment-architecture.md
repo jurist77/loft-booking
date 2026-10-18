@@ -1,6 +1,10 @@
 # Архитектура DEMO и будущего VPS
 
-## Обновление в этапе 2.1
+## Текущая архитектура
+
+По новому заданию PostgreSQL заменён локальным SQLite через better-sqlite3. Один Next.js Node, один файл вне релизов, WAL/FULL, online backup и отдельные SQL-миграции. Актуальное сравнение — [backend-architecture.md](backend-architecture.md), эксплуатация — [sqlite-operations.md](sqlite-operations.md). Следующие разделы сохранены как исторический анализ этапов 1.2/2.1.
+
+## Историческое обновление в этапе 2.1
 
 Утверждены Next.js Route Handlers, PostgreSQL и драйвер `pg`. Подготовлены локальный Docker Compose, разделение DEMO/SERVER, журнал SQL-миграций и health endpoint. Бизнес-операции и таблицы бронирований не реализованы; VPS не развёрнут. Актуальная архитектура — [backend-architecture.md](backend-architecture.md), воспроизводимый запуск — [backend-local-setup.md](backend-local-setup.md). Ниже сохранён контекст анализа этапа 1.2; прежние формулировки о невыбранной БД относятся к этому историческому этапу.
 

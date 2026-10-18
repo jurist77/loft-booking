@@ -32,13 +32,13 @@ jobs:
       - run: npm run lint
       - run: npm run build:server
       - run: npm run db:env
-      - run: npm run db:test:up
+      - run: npm run db:init
+      - run: npm run db:migrate
+      - run: npm run db:migrate
+      - run: npm run db:check
       - run: npm run test:integration
       - run: npm run test:server:http
       - name: Verify persistent database failure causes a nonzero health test exit
         run: npm run test:server:http:failure
-      - name: Stop test PostgreSQL without deleting its volume
-        if: always()
-        run: npm run db:test:stop
       - name: Prove static DEMO ignores database configuration
         run: npm run test:demo:isolation
