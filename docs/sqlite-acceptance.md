@@ -14,7 +14,7 @@
 |---|---|
 | Frozen install | `npm ci` успешно, native-модуль собран; в Codex SDK cache вынесен в `/tmp/studio-node-gyp` поддерживаемой переменной node-gyp |
 | `npm test` | **115 passed**, 9 файлов, существующие клиентские тесты сохранены |
-| `npm run test:integration` | **17 passed**, реальная SQLite на диске, настоящие независимые процессы, без mock БД |
+| `npm run test:integration` | **18 passed**, реальная SQLite на диске, настоящие независимые процессы, без mock БД |
 | `npm run typecheck` / `lint` | Успех, без предупреждений lint |
 | SERVER build | Успех, включая build с пустым SQLITE_PATH: подключение не требуется во время сборки |
 | Node DEMO build | Успех |
@@ -34,7 +34,7 @@
 
 ## Что проверено на реальной SQLite
 
-1. WAL/FULL, timeout, private permissions, переоткрытие соединения и повторный init/migrate без потери записей.
+1. WAL/FULL, timeout, private permissions, переоткрытие соединения и повторный init/migrate без потери записей; принудительный SIGKILL единственного writer после COMMIT с открытым WAL, затем восстановление подтверждённой записи из WAL.
 2. Изменённый checksum, исчезнувший применённый SQL, SQL-ошибка с rollback DDL/истории и ненулевым CLI exit.
 3. Настоящий writer lock и ограниченный MIGRATION_LOCKED; два параллельных мигратора без дублирования истории.
 4. Два независимых SQL-процесса на один интервал: фиксируется только один. Смежные разрешены; overlap/конфликтующее изменение/возврат cancelled отклоняются. Cancellation сохраняет строку и освобождает время.

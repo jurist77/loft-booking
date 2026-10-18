@@ -5,7 +5,11 @@ const db = openDatabase(databaseSettings());
 try {
   const [command, id, start, end] = process.argv.slice(2);
   if (command === "reserve") db.prepare("INSERT INTO bookings(id, starts_at, ends_at) VALUES (?, ?, ?)").run(id, Number(start), Number(end));
-  else if (command === "lock") {
+  else if (command === "commit-and-wait") {
+    db.prepare("INSERT INTO bookings(id, starts_at, ends_at) VALUES (?, ?, ?)").run(id, Number(start), Number(end));
+    process.stdout.write("COMMITTED\n");
+    await new Promise((resolve) => process.stdin.once("data", resolve));
+  } else if (command === "lock") {
     db.exec("BEGIN IMMEDIATE"); process.stdout.write("LOCKED\n");
     await new Promise((resolve) => process.stdin.once("data", resolve));
     db.exec("COMMIT"); process.stdin.pause();

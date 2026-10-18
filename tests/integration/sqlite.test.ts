@@ -54,6 +54,19 @@ it("restarts without data loss and repeat initialization/migration is idempotent
   expect(db.prepare("SELECT count(*) AS n FROM bookings").get()).toEqual({ n: 1 });
   expect(db.prepare("SELECT count(*) AS n FROM schema_migrations").get()).toEqual({ n: 1 });
 });
+it("recovers a committed WAL transaction after the sole writer is killed without closing", async () => {
+  db.close();
+  const writer = command(["tests/integration/sqlite-worker.mjs", "commit-and-wait", "crash-survivor", String(start), String(start + hour)]);
+  try {
+    for (let i = 0; i < 100 && !writer.output.includes("COMMITTED"); i++) await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(writer.output).toContain("COMMITTED");
+    expect(existsSync(path + "-wal")).toBe(true);
+    writer.child.kill("SIGKILL"); await writer.done;
+    expect(writer.child.signalCode).toBe("SIGKILL");
+    db = openDatabase(databaseSettings(env())); assertIntegrity(db, true);
+    expect(db.prepare("SELECT id FROM bookings").all()).toEqual([{ id: "crash-survivor" }]);
+  } finally { if (writer.child.exitCode === null && writer.child.signalCode === null) writer.child.kill("SIGKILL"); await writer.done; }
+});
 it("rejects modified applied SQL and returns nonzero from the CLI", async () => {
   const directory = await manifest(); writeFileSync(join(directory, "0001_foundation.sql"), "SELECT 1;\n");
   await expect(migrate(db, directory)).rejects.toMatchObject({ code: "HISTORY_MISMATCH" });
