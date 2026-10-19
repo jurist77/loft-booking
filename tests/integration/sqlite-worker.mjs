@@ -4,9 +4,9 @@ import { openDatabase } from "../../src/server/database.ts";
 const db = openDatabase(databaseSettings());
 try {
   const [command, id, start, end] = process.argv.slice(2);
-  if (command === "reserve") db.prepare("INSERT INTO bookings(id, starts_at, ends_at) VALUES (?, ?, ?)").run(id, Number(start), Number(end));
+  if (command === "reserve") db.prepare("INSERT INTO bookings(id, resource_id, starts_at, ends_at, first_name, last_name, phone, created_at, updated_at) VALUES (?, 'studio-19-25', ?, ?, 'Тест', 'Пример', '+79000000000', 0, 0)").run(id, Number(start), Number(end));
   else if (command === "commit-and-wait") {
-    db.prepare("INSERT INTO bookings(id, starts_at, ends_at) VALUES (?, ?, ?)").run(id, Number(start), Number(end));
+    db.prepare("INSERT INTO bookings(id, resource_id, starts_at, ends_at, first_name, last_name, phone, created_at, updated_at) VALUES (?, 'studio-19-25', ?, ?, 'Тест', 'Пример', '+79000000000', 0, 0)").run(id, Number(start), Number(end));
     process.stdout.write("COMMITTED\n");
     await new Promise((resolve) => process.stdin.once("data", resolve));
   } else if (command === "lock") {
