@@ -1,6 +1,7 @@
 import "server-only";
 import type Database from "better-sqlite3";
-import { isCalendarDate, timeLabel, validateInterval } from "../lib/availability.ts";
+import { isBookableDate, isCalendarDate, timeLabel, validateInterval } from "../lib/availability.ts";
+import { STUDIO } from "../lib/studio.ts";
 import { validateContact, type ContactDetails } from "../lib/validation.ts";
 
 export const STUDIO_RESOURCE_ID = "studio-19-25";
@@ -11,21 +12,21 @@ export type StoredBooking = {
   firstName: string | null; lastName: string | null; phone: string | null;
   createdAt: number | null; updatedAt: number | null;
 };
-type BookingCode = "INVALID_INPUT" | "INVALID_CONTACT" | "INVALID_INTERVAL" | "RESOURCE_NOT_FOUND" | "BOOKING_NOT_FOUND" | "BOOKING_ID_CONFLICT" | "BOOKING_OVERLAP" | "DATABASE_BUSY" | "STORAGE_FAILURE" | "TRANSACTION_ACTIVE";
+type BookingCode = "INVALID_INPUT" | "INVALID_DATE" | "INVALID_CONTACT" | "INVALID_INTERVAL" | "RESOURCE_NOT_FOUND" | "BOOKING_NOT_FOUND" | "BOOKING_ID_CONFLICT" | "BOOKING_OVERLAP" | "DATABASE_BUSY" | "STORAGE_FAILURE" | "TRANSACTION_ACTIVE";
 export class BookingModelError extends Error {
   readonly code: BookingCode;
   constructor(code: BookingCode) { super(code); this.name = "BookingModelError"; this.code = code; }
 }
 const selectBooking = `SELECT id, resource_id AS resourceId, starts_at AS startsAt, ends_at AS endsAt, status,
   first_name AS firstName, last_name AS lastName, phone, created_at AS createdAt, updated_at AS updatedAt FROM bookings WHERE id = ?`;
-const identifier = (value: unknown): value is string => typeof value === "string" && value.length > 0 && value.length <= 128 && value.trim() === value && !/[\p{Cc}]/u.test(value);
+export const isBookingIdentifier = (value: unknown): value is string => typeof value === "string" && value.length > 0 && value.length <= 128 && value.trim() === value && !/[\p{Cc}]/u.test(value);
 function timestamp(now: Date): number {
   if (!(now instanceof Date) || !Number.isSafeInteger(now.getTime()) || now.getTime() < 0) throw new BookingModelError("INVALID_INPUT");
   return now.getTime();
 }
-function transaction<T>(db: Database.Database, work: () => T): T {
+function transaction<T>(db: Database.Database, work: () => T, mode: "immediate" | "deferred" = "immediate"): T {
   if (db.inTransaction) throw new BookingModelError("TRANSACTION_ACTIVE");
-  try { return db.transaction(work).immediate(); }
+  try { return db.transaction(work)[mode](); }
   catch (error) {
     if (error instanceof BookingModelError) throw error;
     const native = error as { code?: string; message?: string };
@@ -39,7 +40,7 @@ function transaction<T>(db: Database.Database, work: () => T): T {
 /** Internal model only. Caller reuses id for retry, uses a new id for a new request. */
 export function createBooking(db: Database.Database, input: CreateBookingInput, now?: Date): StoredBooking {
   if (now !== undefined) timestamp(now);
-  if (!input || !identifier(input.id) || !identifier(input.resourceId) || typeof input.date !== "string" || !isCalendarDate(input.date) ||
+  if (!input || !isBookingIdentifier(input.id) || !isBookingIdentifier(input.resourceId) || typeof input.date !== "string" || !isCalendarDate(input.date) ||
       !Number.isSafeInteger(input.start) || !Number.isSafeInteger(input.end) ||
       typeof input.firstName !== "string" || typeof input.lastName !== "string" || typeof input.phone !== "string") throw new BookingModelError("INVALID_INPUT");
   const contact = { firstName: input.firstName.trim(), lastName: input.lastName.trim(), phone: input.phone };
@@ -71,7 +72,7 @@ export function createBooking(db: Database.Database, input: CreateBookingInput, 
 
 /** Internal cancellation; future transport must provide authorization. No client API exists yet. */
 export function cancelBooking(db: Database.Database, id: string, now?: Date): StoredBooking {
-  if (!identifier(id)) throw new BookingModelError("INVALID_INPUT");
+  if (!isBookingIdentifier(id)) throw new BookingModelError("INVALID_INPUT");
   if (now !== undefined) timestamp(now);
   return transaction(db, () => {
     const existing = db.prepare(selectBooking).get(id) as StoredBooking | undefined;
@@ -82,4 +83,18 @@ export function cancelBooking(db: Database.Database, id: string, now?: Date): St
     db.prepare("UPDATE bookings SET status = 'cancelled', updated_at = ? WHERE id = ?").run(at, id);
     return db.prepare(selectBooking).get(id) as StoredBooking;
   });
+}
+
+/** Public availability contains only intervals; never select contacts or booking IDs. */
+export function getAvailability(db: Database.Database, date: string, resourceId = STUDIO_RESOURCE_ID, now = new Date()) {
+  timestamp(now);
+  if (typeof date !== "string" || !isCalendarDate(date) || !isBookableDate(date, now)) throw new BookingModelError("INVALID_DATE");
+  if (!isBookingIdentifier(resourceId)) throw new BookingModelError("INVALID_INPUT");
+  const midnight = Date.parse(`${date}T00:00:00+03:00`);
+  return transaction(db, () => {
+    if (!db.prepare("SELECT id FROM resources WHERE id = ?").get(resourceId)) throw new BookingModelError("RESOURCE_NOT_FOUND");
+    const intervals = db.prepare(`SELECT starts_at, ends_at FROM bookings
+      WHERE resource_id = ? AND status = 'confirmed' AND starts_at < ? AND ends_at > ? ORDER BY starts_at`).all(resourceId, midnight + 86400000, midnight) as { starts_at: number; ends_at: number }[];
+    return { date, resourceId, timezone: STUDIO.timeZone, busy: intervals.map((b) => ({ start: timeLabel((b.starts_at - midnight) / 60000), end: timeLabel((b.ends_at - midnight) / 60000) })) };
+  }, "deferred");
 }

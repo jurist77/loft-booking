@@ -38,6 +38,7 @@ jobs:
       - run: npm run db:check
       - run: npm run test:integration
       - run: npm run test:server:http
+      - run: npm run test:api:http
       - name: Verify persistent database failure causes a nonzero health test exit
         run: npm run test:server:http:failure
       - name: Prove static DEMO ignores database configuration

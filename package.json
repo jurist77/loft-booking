@@ -22,6 +22,7 @@
     "db:env": "node scripts/local-env.mjs",
     "test:integration": "vitest run --config vitest.integration.config.ts",
     "test:server:http": "node scripts/verify-server.mjs",
+    "test:api:http": "node --conditions=react-server scripts/verify-booking-api.mjs",
     "test:demo:isolation": "node scripts/verify-demo-isolation.mjs",
     "test:server:http:failure": "node scripts/verify-health-failure.mjs",
     "db:init": "node --env-file-if-exists=.env.sqlite.local --conditions=react-server scripts/database.mjs init",

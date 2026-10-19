@@ -8,7 +8,7 @@ import { databaseSettings } from "../../src/server/config";
 import { assertIntegrity, initializeDatabase, openDatabase } from "../../src/server/database";
 import { migrate } from "../../src/server/migrations";
 import { backupDatabase, restoreDatabase } from "../../src/server/backup";
-import { BookingModelError, cancelBooking, createBooking, STUDIO_RESOURCE_ID, type CreateBookingInput } from "../../src/server/bookings";
+import { BookingModelError, cancelBooking, createBooking, getAvailability, STUDIO_RESOURCE_ID, type CreateBookingInput } from "../../src/server/bookings";
 
 const migrations = resolve("migrations/sqlite");
 const now = new Date("2030-01-15T08:00:00+03:00");
@@ -69,6 +69,22 @@ it("creates a complete confirmed booking and minimal event with normalized conta
   const booking = createBooking(db, input({ firstName: " Тест ", phone: "8 (900) 000-00-00" }), now);
   expect(booking).toEqual({ id: "test-booking", resourceId: STUDIO_RESOURCE_ID, startsAt: Date.parse("2030-01-15T10:00:00+03:00"), endsAt: Date.parse("2030-01-15T11:00:00+03:00"), status: "confirmed", firstName: "Тест", lastName: "Пример", phone: "+79000000000", createdAt: now.getTime(), updatedAt: now.getTime() });
   expect(events()).toEqual([{ booking_id: booking.id, event_type: "created", occurred_at: now.getTime() }]);
+});
+it("reads only confirmed resource intervals, sorted and without contacts or booking IDs", () => {
+  expect(getAvailability(db, "2030-01-15", STUDIO_RESOURCE_ID, now)).toEqual({ date: "2030-01-15", resourceId: STUDIO_RESOURCE_ID, timezone: "Europe/Moscow", busy: [] });
+  otherResource(); createBooking(db, input({ id: "later", start: 720, end: 840 }), now);
+  createBooking(db, input(), now); createBooking(db, input({ id: "other", resourceId: "test-room" }), now);
+  createBooking(db, input({ id: "cancelled", start: 840, end: 900 }), now); cancelBooking(db, "cancelled", now);
+  const result = getAvailability(db, "2030-01-15", STUDIO_RESOURCE_ID, now);
+  expect(result.busy).toEqual([{ start: "10:00", end: "11:00" }, { start: "12:00", end: "14:00" }]);
+  for (const value of ["Тест", "Пример", "+79000000000", "test-booking"]) expect(JSON.stringify(result)).not.toContain(value);
+});
+it("enforces the inclusive Moscow availability horizon and reports unknown resources", () => {
+  expect(() => getAvailability(db, "2030-01-14", STUDIO_RESOURCE_ID, now)).toThrow("INVALID_DATE");
+  expect(() => getAvailability(db, "2030-04-16", STUDIO_RESOURCE_ID, now)).toThrow("INVALID_DATE");
+  expect(() => getAvailability(db, "2030-02-30", STUDIO_RESOURCE_ID, now)).toThrow("INVALID_DATE");
+  expect(getAvailability(db, "2030-04-15", STUDIO_RESOURCE_ID, now).busy).toEqual([]);
+  expect(() => getAvailability(db, "2030-01-15", "missing", now)).toThrow("RESOURCE_NOT_FOUND");
 });
 it("rejects same-resource overlaps but allows both adjacent intervals", () => {
   createBooking(db, input(), now);
