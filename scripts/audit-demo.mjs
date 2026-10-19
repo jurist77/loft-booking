@@ -5,7 +5,7 @@ import { createHash } from "node:crypto";
 
 const root = resolve("out");
 const basePath = process.env.NEXT_PUBLIC_BASE_PATH ?? "/loft-booking";
-const privateValues = ["SQLITE_PATH", "DATABASE_URL", "MIGRATION_DATABASE_URL", "POSTGRES_PASSWORD", "POSTGRES_APP_PASSWORD", "POSTGRES_MIGRATION_PASSWORD"].map((key) => process.env[key]).filter((value) => value && value.length >= 8);
+const privateValues = ["SQLITE_PATH", "API_PUBLIC_ORIGIN", "DATABASE_URL", "MIGRATION_DATABASE_URL", "POSTGRES_PASSWORD", "POSTGRES_APP_PASSWORD", "POSTGRES_MIGRATION_PASSWORD"].map((key) => process.env[key]).filter((value) => value && value.length >= 8);
 try { await stat(resolve(root, "api")); throw new Error("SERVER routes must not be exported"); } catch (error) { if (error.code !== "ENOENT") throw error; }
 const secrets = [
   /-----BEGIN (?:RSA |EC |OPENSSH |DSA )?PRIVATE KEY-----/,
@@ -29,7 +29,7 @@ async function audit(folder) {
     if ([".html", ".js", ".css", ".json", ".txt", ".svg"].includes(extname(file))) {
       const text = data.toString();
       for (const value of privateValues) assert.ok(!text.includes(value), "Private environment value in public artifact (value suppressed)");
-      assert.ok(!["DATABASE_URL", "MIGRATION_DATABASE_URL", "schema_migrations", "better-sqlite3", "SQLITE_PATH", "BOOKING_OVERLAP"].some((marker) => text.includes(marker)), "Server implementation leaked into public export");
+      assert.ok(!["DATABASE_URL", "MIGRATION_DATABASE_URL", "schema_migrations", "better-sqlite3", "SQLITE_PATH", "BOOKING_OVERLAP", "API_PUBLIC_ORIGIN", "API_TRUST_PROXY", "x-studio-client-ip", "BOOKING_CANCELLED"].some((marker) => text.includes(marker)), "Server implementation leaked into public export");
       for (const rule of secrets) assert.ok(!rule.test(text), `Potential credential in ${relative(root, file)} (value suppressed)`);
       if (file.endsWith(".html")) {
         for (const match of text.matchAll(/(?:src|href)="([^"<>]+)"/g)) {
