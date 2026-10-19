@@ -43,3 +43,9 @@ jobs:
         run: npm run test:server:http:failure
       - name: Prove static DEMO ignores database configuration
         run: npm run test:demo:isolation
+      - name: Install browser for real SERVER and DEMO client journeys
+        run: npx playwright install --with-deps chromium
+      - name: Verify real SQLite SERVER UI and unchanged static DEMO
+        run: |
+          export CHROMIUM_PATH="$(node --input-type=module -e 'import { chromium } from "@playwright/test"; process.stdout.write(chromium.executablePath());')"
+          npm run test:server:ui

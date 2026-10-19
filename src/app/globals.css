@@ -177,6 +177,7 @@ h1 em, h2 em, .closing-note em { font-weight: 400; }
 .confirmation-details > div { display: flex; justify-content: space-between; gap: 20px; padding: 12px 0; border-bottom: 1px solid #e3e6d9; font-size: 12px; }
 .confirmation-details dt { color: var(--muted); }
 .confirmation-details dd { margin: 0; }
+.confirmation-details code { overflow-wrap: anywhere; }
 .demo-notice { max-width: 440px; margin: 25px auto; background: #f2ecde; padding: 19px; text-align: left; border-radius: 4px; font-size: 12px; }
 .demo-notice strong { font-weight: 500; }
 .demo-notice p { font-size: 11px; color: #797a65; margin-top: 6px; }
