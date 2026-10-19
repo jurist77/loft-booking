@@ -1,0 +1,28 @@
+{
+  "version": "2.4",
+  "capturedAt": "2026-10-19T07:30:30.728Z",
+  "screenshots": [
+    "server-desktop-01-welcome.png",
+    "server-desktop-02-calendar.png",
+    "server-desktop-03-time.png",
+    "server-desktop-04-contacts.png",
+    "server-desktop-05-confirmation.png",
+    "server-mobile-01-welcome.png",
+    "server-mobile-02-calendar.png",
+    "server-mobile-03-time.png",
+    "server-mobile-04-contacts.png",
+    "server-mobile-05-confirmation.png",
+    "demo-desktop-01-welcome.png",
+    "demo-desktop-02-calendar.png",
+    "demo-desktop-03-time.png",
+    "demo-desktop-04-contacts.png",
+    "demo-desktop-05-confirmation.png",
+    "demo-mobile-01-welcome.png",
+    "demo-mobile-02-calendar.png",
+    "demo-mobile-03-time.png",
+    "demo-mobile-04-contacts.png",
+    "demo-mobile-05-confirmation.png"
+  ],
+  "serverPersisted": 2,
+  "demoApiRequests": 0
+}

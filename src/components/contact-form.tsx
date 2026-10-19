@@ -2,11 +2,11 @@
 
 import { type ContactErrors, type ContactInput } from "@/lib/validation";
 
-type Props = { value: ContactInput; errors: ContactErrors; onChange: (value: ContactInput) => void };
+type Props = { value: ContactInput; errors: ContactErrors; onChange: (value: ContactInput) => void; disabled?: boolean };
 
-export function ContactForm({ value, errors, onChange }: Props) {
+export function ContactForm({ value, errors, onChange, disabled }: Props) {
   function set<K extends keyof ContactInput>(field: K, next: ContactInput[K]) { onChange({ ...value, [field]: next }); }
-  const attributes = (field: keyof ContactInput) => ({ "aria-invalid": !!errors[field], "aria-describedby": errors[field] ? `${field}-error` : undefined });
+  const attributes = (field: keyof ContactInput) => ({ disabled, "aria-invalid": !!errors[field], "aria-describedby": errors[field] ? `${field}-error` : undefined });
   const error = (field: keyof ContactInput) => errors[field] && <span className="field-error" id={`${field}-error`}>{errors[field]}</span>;
   return (
     <div className="contact-fields">

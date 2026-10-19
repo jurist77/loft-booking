@@ -3,15 +3,24 @@ import { validateInterval, type Booking } from "./availability";
 import { validateContact, type ContactDetails, type ContactInput, type NotificationChannel } from "./validation";
 
 export type BookingRequest = Booking & { contact: ContactInput };
-export type Confirmation = Booking & { contact: ContactDetails; channel?: NotificationChannel; demo: true };
-
-/** Replace this boundary with a server API later; the UI never owns persistence. */
-export interface BookingService {
-  getBookings(now: Date): Promise<Booking[]>;
-  confirm(request: BookingRequest, now: Date): Promise<Confirmation>;
+export type DemoConfirmation = Booking & { contact: ContactDetails; channel?: NotificationChannel; demo: true };
+export type ServerConfirmation = Booking & { bookingId: string; resourceId: string; demo: false };
+export type Confirmation = DemoConfirmation | ServerConfirmation;
+type ClientErrorKind = "availability" | "overlap" | "input" | "limited" | "unknown" | "conflict";
+export class BookingClientError extends Error {
+  constructor(readonly kind: ClientErrorKind, message: string, readonly retryAt = 0, readonly uncertain = false) { super(message); this.name = "BookingClientError"; }
 }
 
-export function createDemoService(readBookings: (now: Date) => Promise<Booking[]> = async (now) => createDemoBookings(now)): BookingService {
+/** DEMO and same-origin HTTP adapters share this boundary; the UI never owns persistence. */
+export interface BookingService<C extends Confirmation = Confirmation> {
+  getBookings(now: Date, date?: string, signal?: AbortSignal): Promise<Booking[]>;
+  confirm(request: BookingRequest, now: Date): Promise<C>;
+  isRetry?(request: BookingRequest): boolean;
+  acknowledgeChange?(): void;
+  reset?(): void;
+}
+
+export function createDemoService(readBookings: (now: Date) => Promise<Booking[]> = async (now) => createDemoBookings(now)): BookingService<DemoConfirmation> {
   return {
     getBookings: readBookings,
     async confirm(request, now) {

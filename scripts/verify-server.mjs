@@ -59,7 +59,7 @@ async function main() {
       server.once("exit", (code, signal) => { exitInfo = { code, signal }; resolve(); });
     });
     await waitForHealth(url, { phase, expectedStatus: 200, timeoutMs: 15000, assertAlive });
-    // A separate fresh connection also verifies SERVER does not offer demo bookings.
+    // SERVER now offers the real booking path; its first render contains no demo slots.
     const { get } = await import("node:http");
     const page = await new Promise((resolve, reject) => {
       const request = get(`http://127.0.0.1:${port}/`, { agent: false, signal: AbortSignal.timeout(3000) }, (response) => {
@@ -70,7 +70,7 @@ async function main() {
       });
       request.on("error", () => reject(new HealthProbeError("SERVER_PAGE_FAILED")));
     });
-    if (!page.includes("Серверный режим") || !page.includes("Онлайн-запись пока недоступна") || page.includes('class="slots"')) throw new HealthProbeError("INVALID_SERVER_PAGE");
+    if (!page.includes("Серверный режим") || !page.includes("Онлайн-бронирование студии") || page.includes('class="slots"') || page.includes("Демонстрационная версия")) throw new HealthProbeError("INVALID_SERVER_PAGE");
     for (let cycle = 1; cycle <= (negativeControl ? 1 : 3); cycle++) {
       phase = `stopped-${cycle}`;
       stopped = true; await availability("down");
