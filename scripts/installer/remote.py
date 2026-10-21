@@ -79,9 +79,13 @@ def host_facts():
     arch = {"x86_64": "x64", "aarch64": "arm64"}.get(platform.machine())
     require(arch, "ARCH_UNSUPPORTED")
     require(Path("/run/systemd/system").is_dir(), "SYSTEMD_REQUIRED")
-    for command in ("systemctl", "systemd-run", "useradd"):
+    for command in ("systemctl", "systemd-run", "useradd", "findmnt"):
         require(shutil.which(command, path="/usr/sbin:/usr/bin:/sbin:/bin"), "BASE_TOOL_MISSING")
     require(run(["systemctl", "is-system-running"], check=False) in (0, 1), "SYSTEMD_UNAVAILABLE")
+    for path in (BASE, DATA, BACKUPS, CACHE):
+        target = path if path.exists() else path.parent
+        filesystem = run(["findmnt", "--noheadings", "--output", "FSTYPE", "--target", target], "STORAGE_TYPE_UNAVAILABLE")
+        require(filesystem in ("ext4", "xfs", "btrfs", "zfs"), "LOCAL_PERSISTENT_STORAGE_REQUIRED")
     return {"status": "CONNECTED", "arch": arch, "os": "ubuntu", "os_version": "24.04"}
 
 
