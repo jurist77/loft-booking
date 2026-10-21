@@ -140,6 +140,17 @@ def check_isolation():
     rows = [line for line in command(["ss", "-H", "-lntp"]).stdout.splitlines() if f"pid={pid}," in line]
     assert rows and all("127.0.0.1:" in row for row in rows), "Public application listener"
     assert command(["systemctl", "is-enabled", installer.SERVICE]).stdout.strip() == "enabled"
+    # The packaged service must also serve its real page, JS/CSS and original logo.
+    base = f"http://127.0.0.1:{state()['port']}"
+    with urllib.request.urlopen(base + "/", timeout=5) as response:
+        html = response.read().decode()
+    assert "Серверный режим" in html and "Демонстрационная версия" not in html
+    assets = set(re.findall(r'(?:src|href)="(/_next/static/[^" ]+)"', html))
+    assert assets
+    assets.add("/images/studio-19-25-logo.jpg")
+    for asset in assets:
+        with urllib.request.urlopen(base + asset, timeout=5) as response:
+            assert response.status == 200 and response.read(1)
 
 
 def cleanup():
@@ -158,13 +169,16 @@ def main():
     parser.add_argument("--archive", required=True, type=Path)
     parser.add_argument("--version", required=True)
     args = parser.parse_args()
-    assert os.geteuid() == 0 and os.environ.get("STUDIO_INSTALLER_CI") == "1" and os.environ.get("GITHUB_ACTIONS") == "true"
-    assert str(REPO).startswith("/home/runner/work/"), "Only disposable GitHub runners"
-    assert not any(p.exists() for p in (*SITE_PATHS, installer.UNIT)), "Refusing pre-existing Studio installation"
+    if not (os.geteuid() == 0 and os.environ.get("STUDIO_INSTALLER_CI") == "1" and os.environ.get("GITHUB_ACTIONS") == "true"
+            and str(REPO).startswith("/home/runner/work/")):
+        raise SystemExit("CI_ONLY: refusing to run outside a disposable GitHub runner")
+    if any(p.exists() for p in (*SITE_PATHS, installer.UNIT)):
+        raise SystemExit("CI_FIXTURE_COLLISION: refusing pre-existing Studio installation")
     original_checksum = installer.digest(args.archive)
     canary_unit = Path("/etc/systemd/system/studio-ci-vpn.service")
     canary_directory = Path("/opt/studio-ci-vpn")
-    assert not canary_directory.exists() and not canary_unit.exists()
+    if canary_directory.exists() or canary_unit.exists():
+        raise SystemExit("CI_FIXTURE_COLLISION")
     canary_directory.mkdir(mode=0o755)
     (canary_directory / "private.conf").write_text("synthetic readable canary, no real VPN or credentials")
     os.chmod(canary_directory / "private.conf", 0o644)

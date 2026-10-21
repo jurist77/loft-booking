@@ -5,6 +5,7 @@ import importlib.util
 import io
 import json
 import os
+import pwd
 from pathlib import Path
 import secrets
 import shutil
@@ -14,6 +15,7 @@ import tempfile
 import time
 
 REPO = Path(__file__).resolve().parents[2]
+PHASE = "guard"
 spec = importlib.util.spec_from_file_location("transport", REPO / "scripts/installer/deploy.py")
 transport = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(transport)
@@ -24,14 +26,23 @@ def command(args, **kwargs):
 
 
 def main():
-    assert os.geteuid() == 0 and os.environ.get("STUDIO_INSTALLER_CI") == "1" and os.environ.get("GITHUB_ACTIONS") == "true"
-    assert str(REPO).startswith("/home/runner/work/")
+    global PHASE
+    if not (os.geteuid() == 0 and os.environ.get("STUDIO_INSTALLER_CI") == "1" and os.environ.get("GITHUB_ACTIONS") == "true"
+            and str(REPO).startswith("/home/runner/work/")):
+        raise SystemExit("CI_ONLY: refusing to run outside a disposable GitHub runner")
     user = "studio-ssh-ci"
+    try:
+        pwd.getpwnam(user)
+    except KeyError:
+        pass
+    else:
+        raise SystemExit("CI_FIXTURE_COLLISION: refusing pre-existing SSH account")
     password = secrets.token_urlsafe(32)
     daemon = None
     with tempfile.TemporaryDirectory(prefix="studio-ssh-ci-") as directory:
         root = Path(directory)
         try:
+            PHASE = "create-test-account"
             command(["useradd", "--system", "--no-create-home", "--shell", "/bin/sh", user])
             # Password goes only through stdin, never argv/file/stdout.
             command(["chpasswd"], input=(user + ":" + password + "\n").encode())
@@ -44,6 +55,9 @@ def main():
             config.write_text(f"Port {port}\nListenAddress 127.0.0.1\nHostKey {key}\nPidFile {root}/pid\n"
                               f"PasswordAuthentication yes\nKbdInteractiveAuthentication no\nUsePAM no\nPermitRootLogin no\nAllowUsers {user}\nLogLevel QUIET\n")
             Path("/run/sshd").mkdir(exist_ok=True)
+            PHASE = "validate-test-sshd"
+            command(["/usr/sbin/sshd", "-t", "-f", str(config)])
+            PHASE = "start-test-sshd"
             daemon = subprocess.Popen(["/usr/sbin/sshd", "-D", "-f", str(config)], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
             for _ in range(50):
                 try:
@@ -52,8 +66,10 @@ def main():
                 except OSError:
                     time.sleep(.1)
             client = transport.SSH("127.0.0.1", password, user=user, port=port)
+            PHASE = "valid-password"
             result = client.execute("printf '%s' '{\"status\":\"CONNECTED\"}'")
             assert result == {"status": "CONNECTED"}
+            PHASE = "wrong-password"
             try:
                 transport.SSH("127.0.0.1", "wrong-" + password, user=user, port=port).execute("true")
                 raise AssertionError("Wrong password accepted")
@@ -61,6 +77,7 @@ def main():
                 assert str(error) == "SSH_AUTH_FAILED"
             # A hostile SSH stdout/error cannot put the password into public logs.
             output = io.StringIO()
+            PHASE = "malformed-output"
             with contextlib.redirect_stdout(output):
                 try:
                     client.execute("printf '%s' 'synthetic-non-json-output'")
@@ -70,6 +87,7 @@ def main():
             assert password not in output.getvalue()
             daemon.terminate()
             daemon.wait(timeout=10)
+            PHASE = "refused-connection"
             try:
                 client.execute("true")
                 raise AssertionError("Stopped SSH server accepted connection")
@@ -84,4 +102,9 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    except Exception as error:
+        code = str(error) if isinstance(error, transport.DeployError) else type(error).__name__
+        print("::error title=SSH CI::" + PHASE + ": " + code)
+        raise

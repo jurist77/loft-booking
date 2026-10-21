@@ -1,5 +1,7 @@
 # studio 19.25 · Творческое пространство · DEMO 1.4 / SQLite backend
 
+Этап **2.5.2 — универсальный установщик через GitHub Actions**: [добавление Secret, запуск с одним `server_ip`, обновление, безопасный доступ и риски](docs/universal-installer.md), [отчёт испытаний](docs/acceptance/v2.5.2/README.md). Только ручной SERVER deploy после merge и успешных проверок main; реальный VPS на этапе разработки не используется. Проверка SSH host key отключается только новым workflow по явному решению владельца; риск MITM описан в инструкции. Автоматическая публикация DEMO остаётся прежней.
+
 Этап **2.5.1 — подготовка аудита VPS, без установки**: [безопасный скрипт и команды с Mac](docs/vps-audit-runbook.md), [таблица Швеция / Финляндия](docs/vps-comparison-v2.5.1.md), [проект размещения, backup, обновления и отката](docs/vps-deployment-plan.md), [результаты проверок](docs/acceptance/v2.5.1/README.md). Реальные измерения обоих VPS ещё не получены; аудит и выбор сервера не завершены. VPN и публичный DEMO не меняются.
 
 Пять экранов одного React/Next.js приложения: Welcome → Calendar → Time → Contacts → Confirmation. На странице смонтирован только текущий экран. Этап 2.4 подключает SERVER-интерфейс к API и SQLite после слияния PR №9, от `main` `756c9e153bd52ba1d0e23bdb191005e8e4beaa13`. Публикация согласованных изменений после merge в `main` выполняется существующим GitHub Actions workflow.
