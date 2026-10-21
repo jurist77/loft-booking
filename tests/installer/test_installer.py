@@ -34,6 +34,19 @@ VERSION = "a" * 40
 
 
 class InstallerTests(unittest.TestCase):
+    def test_update_refuses_custom_environment_before_any_mutation(self):
+        with contextlib.ExitStack() as stack:
+            stack.enter_context(patch.object(remote, "host_facts", return_value={"arch": "x64"}))
+            stack.enter_context(patch.object(remote, "inspect_archive", return_value={}))
+            stack.enter_context(patch.object(remote, "load_state", return_value={"current": "managed", "version": VERSION, "port": 3000}))
+            stack.enter_context(patch.object(remote, "managed_account", return_value=SimpleNamespace(pw_uid=11, pw_gid=11)))
+            stack.enter_context(patch.object(remote, "owned_directory"))
+            stack.enter_context(patch.object(remote, "private_environment", return_value="API_PUBLIC_ORIGIN=https://example.invalid\n"))
+            commands = stack.enter_context(patch.object(remote, "run"))
+            with self.assertRaisesRegex(remote.InstallError, "ENVIRONMENT_CHANGED_OUTSIDE_INSTALLER"):
+                remote.install(Path("/tmp/not-read"), "0" * 64, "b" * 40)
+            commands.assert_not_called()
+
     def test_main_gate_rejects_other_refs_missing_secret_and_failed_newest_check(self):
         env = {"STUDIO_SERVER_IP": "203.0.113.9", "STUDIO_PASSWORD_PRESENT": "true", "GITHUB_SHA": VERSION,
                "GITHUB_REF": "refs/heads/main", "GITHUB_REPOSITORY": "owner/repo"}

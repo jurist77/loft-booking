@@ -328,8 +328,9 @@ def install(archive_path, checksum, version):
             owned_directory(path)
         for path in (DATA, BACKUPS, CACHE):
             owned_directory(path, account.pw_uid, account.pw_gid)
+        if state.get("current"):
+            require(private_environment() == environment_text(state["port"]), "ENVIRONMENT_CHANGED_OUTSIDE_INSTALLER")
     if state and state.get("current") and state.get("version") == version:
-        require(private_environment() == environment_text(state["port"]), "ENVIRONMENT_CHANGED_OUTSIDE_INSTALLER")
         try:
             health(state["port"], timeout=5)
         except InstallError as error:
