@@ -406,7 +406,7 @@ def install(archive_path, checksum, version):
         health(port)
         run(["systemctl", "enable", SERVICE], "SERVICE_ENABLE_FAILED")
         state.update(phase="ready", current=release_id, previous=old_state.get("current") if old_state else None,
-                     version=version, port=port, unit_sha256=digest(UNIT))
+                     version=version, archive_sha256=checksum, port=port, unit_sha256=digest(UNIT))
         store_state(state)
         return {"status": "SUCCESS", "version": version, "operation": "update" if old_release else "install",
                 "migrations": "verified", "service": "active-enabled", "health": 200, "listener": f"127.0.0.1:{port}"}

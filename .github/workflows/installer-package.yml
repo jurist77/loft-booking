@@ -6,6 +6,9 @@ on:
       source_sha:
         required: true
         type: string
+      publish_packages:
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -60,6 +63,7 @@ jobs:
           STUDIO_SOURCE_SHA: ${{ inputs.source_sha }}
         run: sudo env STUDIO_INSTALLER_CI=1 GITHUB_ACTIONS=true python3 tests/installer/real_systemd.py --archive "$RUNNER_TEMP/server.tar.gz" --version "$STUDIO_SOURCE_SHA"
       - name: Publish only the verified immutable package (never VPS data)
+        if: inputs.publish_packages
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           name: studio-server-${{ matrix.arch }}
@@ -67,5 +71,5 @@ jobs:
             ${{ runner.temp }}/server.tar.gz
             ${{ runner.temp }}/server.tar.gz.sha256
           if-no-files-found: error
-          retention-days: 7
+          retention-days: 1
           compression-level: 0
