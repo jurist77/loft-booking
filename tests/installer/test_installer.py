@@ -25,11 +25,32 @@ def load(name, filename):
 
 remote = load("remote", "remote.py")
 deploy = load("deploy", "deploy.py")
+packager = load("packager", "package.py")
 SECRET = "secret-example-not-an-actual-password"
 VERSION = "a" * 40
 
 
 class InstallerTests(unittest.TestCase):
+    def test_generated_next_external_link_materialized_but_host_escape_refused(self):
+        import os
+        with tempfile.TemporaryDirectory() as temporary:
+            previous = Path.cwd()
+            try:
+                os.chdir(temporary)
+                Path("node_modules/pkg").mkdir(parents=True)
+                Path("node_modules/pkg/code.js").write_text("module.exports = 1")
+                Path(".next-server/node_modules").mkdir(parents=True)
+                Path(".next-server/node_modules/pkg-generated").symlink_to(Path("node_modules/pkg").resolve(), target_is_directory=True)
+                packager.copy_tree(Path(".next-server"), Path("copy"))
+                self.assertFalse(Path("copy/node_modules/pkg-generated").is_symlink())
+                self.assertEqual(Path("copy/node_modules/pkg-generated/code.js").read_text(), "module.exports = 1")
+                Path("outside").write_text(SECRET)
+                Path(".next-server/escape").symlink_to(Path("outside").resolve())
+                with self.assertRaisesRegex(RuntimeError, "SOURCE_SYMLINK_ESCAPE"):
+                    packager.copy_tree(Path(".next-server"), Path("blocked"))
+            finally:
+                os.chdir(previous)
+
     def test_literal_ip_only_ipv4_and_ipv6(self):
         self.assertEqual(deploy.server_ip("203.0.113.9"), "203.0.113.9")
         self.assertEqual(deploy.server_ip("2001:0db8:0000::2"), "2001:db8::2")

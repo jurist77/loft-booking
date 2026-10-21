@@ -27,6 +27,7 @@ jobs:
       - name: Require literal IP, main and successful checks for this exact SHA
         env:
           STUDIO_SERVER_IP: ${{ inputs.server_ip }}
+          STUDIO_PASSWORD_PRESENT: ${{ secrets.STUDIO_SSH_PASSWORD != '' }}
           GH_TOKEN: ${{ github.token }}
         run: python3 scripts/installer/verify-main.py
   packages:
@@ -59,3 +60,18 @@ jobs:
           STUDIO_SSH_PASSWORD: ${{ secrets.STUDIO_SSH_PASSWORD }}
           STUDIO_SOURCE_SHA: ${{ github.sha }}
         run: python3 scripts/installer/deploy.py --artifacts "$RUNNER_TEMP/studio-packages" --version "$STUDIO_SOURCE_SHA"
+  result:
+    if: always()
+    needs: [validate, packages, install]
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Final workflow outcome
+        env:
+          STUDIO_INSTALL_RESULT: ${{ needs.install.result }}
+        run: |
+          if [ "$STUDIO_INSTALL_RESULT" = success ]; then
+            echo 'SUCCESS: see installation summary for version, migrations, service, health and private listener.' >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo 'FAILED: no successful deployment is claimed. See the safe error code in earlier jobs; after transport interruption the server outcome may be unknown.' >> "$GITHUB_STEP_SUMMARY"
+            exit 1
+          fi

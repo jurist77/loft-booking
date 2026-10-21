@@ -10,6 +10,8 @@ from deploy import DeployError, server_ip
 def main():
     try:
         server_ip(os.environ.get("STUDIO_SERVER_IP", ""))
+        if os.environ.get("STUDIO_PASSWORD_PRESENT") != "true":
+            raise DeployError("STUDIO_SSH_PASSWORD_MISSING")
         sha = os.environ.get("GITHUB_SHA", "")
         if os.environ.get("GITHUB_REF") != "refs/heads/main" or not re.fullmatch(r"[0-9a-f]{40}", sha):
             raise DeployError("MAIN_REQUIRED")

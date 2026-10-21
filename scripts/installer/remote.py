@@ -148,13 +148,30 @@ def load_state():
     require(state.get("format") == 1 and state.get("managed_by") == "studio-installer", "UNMANAGED_STATE")
     require(state.get("phase") in ("ready", "failed-first"), "INTERRUPTED_INSTALL_REQUIRES_REVIEW")
     if state.get("current"):
-        require(re.fullmatch(r"[0-9a-f]{40}-[0-9a-f]{16}", state["current"]), "UNSAFE_STATE")
+        require(isinstance(state.get("port"), int) and (state["port"] == 3000 or 3100 <= state["port"] <= 3199), "UNSAFE_STATE")
+        require(re.fullmatch(r"[0-9a-f]{40}-[0-9a-f]{16}-[0-9a-f]{8}", state["current"]), "UNSAFE_STATE")
         require(UNIT.is_file() and not UNIT.is_symlink() and digest(UNIT) == state.get("unit_sha256"), "UNIT_CHANGED_OUTSIDE_INSTALLER")
     return state
 
 
 def store_state(state):
     atomic_write(CONFIG / "state.json", json.dumps(state, sort_keys=True))
+
+
+def managed_account(state):
+    account = pwd.getpwnam(USER)
+    require(account.pw_uid != 0 and account.pw_shell == "/usr/sbin/nologin", "UNSAFE_APPLICATION_USER")
+    require(account.pw_uid == state.get("uid") and account.pw_gid == state.get("gid"), "APPLICATION_IDENTITY_CHANGED")
+    require(set(os.getgrouplist(USER, account.pw_gid)) == {account.pw_gid}, "EXTRA_APPLICATION_GROUPS_REFUSED")
+    return account
+
+
+def private_environment():
+    path = CONFIG / "server.env"
+    info = path.lstat()
+    require(stat.S_ISREG(info.st_mode) and info.st_uid == 0 and info.st_nlink == 1 and stat.S_IMODE(info.st_mode) == 0o600,
+            "UNSAFE_ENVIRONMENT")
+    return path.read_text()
 
 
 def inspect_archive(archive_path, expected_sha, version, arch):
@@ -299,7 +316,14 @@ def install(archive_path, checksum, version):
     facts = host_facts()
     manifest = inspect_archive(archive_path, checksum, version, facts["arch"])
     state = load_state()
+    if state:
+        account = managed_account(state)
+        for path in (BASE, BASE / "releases"):
+            owned_directory(path)
+        for path in (DATA, BACKUPS, CACHE):
+            owned_directory(path, account.pw_uid, account.pw_gid)
     if state and state.get("current") and state.get("version") == version:
+        require(private_environment() == environment_text(state["port"]), "ENVIRONMENT_CHANGED_OUTSIDE_INSTALLER")
         health(state["port"])
         return {"status": "SUCCESS", "version": version, "operation": "already-current", "migrations": "unchanged",
                 "service": "active", "health": 200, "listener": f"127.0.0.1:{state['port']}"}
@@ -314,24 +338,24 @@ def install(archive_path, checksum, version):
     old_state = dict(state) if state else None
     old_release = BASE / "releases" / state["current"] if state and state.get("current") else None
     old_unit = UNIT.read_text() if old_release else None
-    old_env = (CONFIG / "server.env").read_text() if old_release else None
+    old_env = private_environment() if old_release else None
     old_schema = None
     modified = False
     try:
         if not state:
             run(["useradd", "--system", "--user-group", "--home-dir", "/nonexistent", "--no-create-home", "--shell", "/usr/sbin/nologin", USER], "USER_CREATE_FAILED")
             CONFIG.mkdir(mode=0o700)
-            state = {"format": 1, "managed_by": "studio-installer", "phase": "failed-first", "current": None}
+            account = pwd.getpwnam(USER)
+            state = {"format": 1, "managed_by": "studio-installer", "phase": "failed-first", "current": None,
+                     "uid": account.pw_uid, "gid": account.pw_gid}
             store_state(state)
-        account = pwd.getpwnam(USER)
-        require(account.pw_uid != 0 and account.pw_shell == "/usr/sbin/nologin", "UNSAFE_APPLICATION_USER")
+        account = managed_account(state)
         for path in (BASE, BASE / "releases"):
             owned_directory(path, mode=0o755, create=True)
         for path in (DATA, BACKUPS, CACHE):
             owned_directory(path, account.pw_uid, account.pw_gid, create=True)
-        release_id = version + "-" + checksum[:16]
+        release_id = version + "-" + checksum[:16] + "-" + uuid.uuid4().hex[:8]
         release = BASE / "releases" / release_id
-        require(not release.exists(), "RELEASE_ALREADY_EXISTS_REQUIRES_REVIEW")
         release.mkdir(mode=0o755)
         with tarfile.open(archive_path, "r:gz") as archive:
             archive.extractall(release, filter="data")
@@ -339,6 +363,7 @@ def install(archive_path, checksum, version):
         for entry in release.rglob("*"):
             os.chmod(entry, 0o755 if entry.is_dir() or entry.stat().st_mode & 0o111 else 0o644)
         require(run([release / "root/usr/bin/node", "--version"]) == NODE_VERSION, "RUNTIME_UNAVAILABLE")
+        require(helper(release, ["--version"], "SANDBOX_RUNTIME_UNAVAILABLE") == NODE_VERSION, "SANDBOX_RUNTIME_UNAVAILABLE")
         for name, expected in manifest["migrations"].items():
             require(re.fullmatch(r"\d{4}_[a-z0-9_]+\.sql", name) and digest(release / "root/app/migrations/sqlite" / name) == expected, "MIGRATION_CHECKSUM_MISMATCH")
         # Test actual native SQLite in the packaged root before touching the service.
@@ -413,6 +438,7 @@ def main():
     parser.add_argument("--version")
     args = parser.parse_args()
     os.umask(0o077)
+    os.nice(10)
     def interrupted(_number, _frame):
         raise InstallError("INTERRUPTED")
     for sig in (signal.SIGTERM, signal.SIGHUP, signal.SIGINT):

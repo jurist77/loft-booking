@@ -41,7 +41,7 @@ def apply(archive, version, expected_success=True):
         result = subprocess.run(["python3", "-c", transport.BOOTSTRAP], stdin=payload, capture_output=True, text=True, timeout=1500)
     assert result.returncode == (0 if expected_success else 1), "Unexpected installer outcome: " + result.stdout[:200]
     value = json.loads(result.stdout)
-    print("CI_INSTALL: " + json.dumps(value), flush=True)
+    print("::notice title=Installer CI phase::" + json.dumps(value), flush=True)
     return value
 
 
@@ -93,7 +93,7 @@ def variant(original, directory, version, fault=None):
     manifest["unpacked_bytes"] = sum(p.stat().st_size for p in (root / "root").rglob("*") if p.is_file())
     manifest_path.write_text(json.dumps(manifest))
     destination = directory / "variant.tar.gz"
-    with tarfile.open(destination, "w:gz") as archive:
+    with tarfile.open(destination, "w:gz", compresslevel=1) as archive:
         archive.add(manifest_path, arcname="manifest.json")
         archive.add(root / "root", arcname="root")
     shutil.rmtree(root)
@@ -114,8 +114,12 @@ def fingerprints():
             elif entry.is_file():
                 result[str(entry)] = installer.digest(entry)
     result["dns"] = installer.digest(Path("/etc/resolv.conf"))
-    result["routes"] = command(["ip", "-j", "route", "show", "table", "all"]).stdout
-    result["firewall"] = command(["iptables-save"]).stdout
+    routes = json.loads(command(["ip", "-j", "route", "show", "table", "all"]).stdout)
+    for route in routes:
+        route.pop("expires", None)  # DHCP/RA lifetime decreases without a config change.
+    result["routes"] = json.dumps(routes, sort_keys=True)
+    # iptables-save adds wall-clock Generated/Completed comments on every read.
+    result["firewall"] = "\n".join(line for line in command(["iptables-save"]).stdout.splitlines() if not line.startswith("#"))
     result["canary"] = installer.digest(Path("/opt/studio-ci-vpn/private.conf"))
     result["canary_pid"] = command(["systemctl", "show", "studio-ci-vpn.service", "-p", "MainPID", "--value"]).stdout
     return result
@@ -212,4 +216,10 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    except Exception as error:
+        detail = str(error)[:700] if isinstance(error, (AssertionError, installer.InstallError)) else type(error).__name__
+        detail = detail.replace("%", "%25").replace("\r", "%0D").replace("\n", "%0A")
+        print("::error title=Installer CI::" + detail)
+        raise
