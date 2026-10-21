@@ -9,6 +9,7 @@ import subprocess
 import sys
 import tarfile
 import tempfile
+import textwrap
 import unittest
 from types import SimpleNamespace
 from unittest.mock import patch
@@ -34,6 +35,18 @@ VERSION = "a" * 40
 
 
 class InstallerTests(unittest.TestCase):
+    def test_workflow_summary_does_not_report_success_after_cleanup_failure(self):
+        import os
+        workflow = (SCRIPTS.parents[1] / ".github/workflows/install-studio.yml").read_text()
+        script = textwrap.dedent(workflow.split("      - name: Final workflow outcome", 1)[1].split("        run: |\n", 1)[1])
+        for installation, cleanup, expected in (("success", "success", 0), ("success", "failure", 1), ("failure", "success", 1)):
+            with tempfile.TemporaryDirectory() as directory:
+                summary = Path(directory) / "summary"
+                result = subprocess.run(["bash", "-c", script], env={**os.environ, "STUDIO_INSTALL_RESULT": installation,
+                                        "STUDIO_CLEANUP_RESULT": cleanup, "GITHUB_STEP_SUMMARY": str(summary)}, capture_output=True)
+                self.assertEqual(result.returncode, expected)
+                self.assertTrue(summary.read_text().startswith("SUCCESS" if expected == 0 else "FAILED"))
+
     def test_update_refuses_custom_environment_before_any_mutation(self):
         with contextlib.ExitStack() as stack:
             stack.enter_context(patch.object(remote, "host_facts", return_value={"arch": "x64"}))

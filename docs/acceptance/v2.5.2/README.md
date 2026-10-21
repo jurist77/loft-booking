@@ -49,7 +49,7 @@ Production receiver тестируется с тем же framed code/archive st
 
 Локальная cloud-среда — Debian 13 без работающего systemd PID1 и без root. Поэтому здесь не имитируется Ubuntu/VPS установка: только Python security unit tests, YAML/синтаксис и доступные existing checks. Root/systemd/архитектурные результаты берутся из GitHub CI, не из моков.
 
-- Unit установщика: **17 passed** в cloud; дополнительно выполняются на обеих CI архитектурах. Включён отказ от перезаписи изменённого SERVER environment при обновлении на другой SHA.
+- Unit установщика: **18 passed** в cloud; дополнительно выполняются на обеих CI архитектурах. Включены отказ от перезаписи изменённого SERVER environment и корректный итог workflow при ошибке очистки transient artifacts.
 - Настоящие install/update/failure/rollback на Ubuntu 24.04 **x64 и ARM64** прошли в CI, включая stopped first failure/retry, сохранность брони и правила безопасности. Проверки private HTTP assets включены в финальный прогон.
 - Настоящий SSH CI: успешный вход, неверный пароль, недоступный listener и безопасные ошибки проверены на обеих архитектурах. IPv6 loopback проверяется при наличии kernel support и отдельно отмечается в CI notice; публичная IPv6-маршрутизация/реальный VPS не проверялись.
 - В ходе испытаний исправлена классификация отказа авторизации: при NumberOfPasswordPrompts=1 OpenSSH может вернуть 255 вместо sshpass 5. Фиксированные C-locale маркеры stderr разбираются только в памяти, raw stderr не публикуется; число попыток не увеличено. Добавлен regression unit test.

@@ -69,6 +69,7 @@ jobs:
       actions: write # Delete only this run's transient package artifacts after transfer.
     steps:
       - name: Remove this run's transient packages without keeping billable build storage
+        id: artifact_cleanup
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
@@ -80,9 +81,13 @@ jobs:
         if: always()
         env:
           STUDIO_INSTALL_RESULT: ${{ needs.install.result }}
+          STUDIO_CLEANUP_RESULT: ${{ steps.artifact_cleanup.outcome }}
         run: |
-          if [ "$STUDIO_INSTALL_RESULT" = success ]; then
+          if [ "$STUDIO_INSTALL_RESULT" = success ] && [ "$STUDIO_CLEANUP_RESULT" = success ]; then
             echo 'SUCCESS: see installation summary for version, migrations, service, health and private listener.' >> "$GITHUB_STEP_SUMMARY"
+          elif [ "$STUDIO_INSTALL_RESULT" = success ]; then
+            echo 'FAILED: application installation and health were confirmed, but transient artifact cleanup failed. The working application was not rolled back for a GitHub storage error.' >> "$GITHUB_STEP_SUMMARY"
+            exit 1
           else
             echo 'FAILED: no successful deployment is claimed. See the safe error code in earlier jobs; after transport interruption the server outcome may be unknown.' >> "$GITHUB_STEP_SUMMARY"
             exit 1
