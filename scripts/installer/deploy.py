@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Runner-side password SSH transport. Never print raw SSH output or secrets."""
 import argparse
+import contextlib
 import hashlib
 import ipaddress
 import json
@@ -159,6 +160,21 @@ def safe_result(value, version):
     return {key: value[key] for key in ("status", "version", "operation", "migrations", "service", "health", "listener")}
 
 
+@contextlib.contextmanager
+def upload_payload(archive, version, checksum):
+    import tempfile
+    import shutil
+    with tempfile.TemporaryFile() as payload:
+        code = (HERE / "remote.py").read_bytes()
+        header = {"code_size": len(code), "archive_size": archive.stat().st_size, "sha256": checksum, "version": version}
+        payload.write(json.dumps(header).encode() + b"\n")
+        payload.write(code)
+        with archive.open("rb") as stream:
+            shutil.copyfileobj(stream, payload)
+        payload.seek(0)
+        yield payload
+
+
 def deploy(address, artifacts, version, password):
     require_version = re.fullmatch(r"[0-9a-f]{40}", version)
     if not require_version:
@@ -178,17 +194,8 @@ def deploy(address, artifacts, version, password):
         if hashlib.file_digest(stream, "sha256").hexdigest() != checksum:
             raise DeployError("ARTIFACT_CHECKSUM_MISMATCH")
     # tempfile here contains only code/archive, never password. It bounds memory usage.
-    import tempfile
-    import shutil
     import shlex
-    with tempfile.TemporaryFile() as payload:
-        code = (HERE / "remote.py").read_bytes()
-        header = {"code_size": len(code), "archive_size": archive.stat().st_size, "sha256": checksum, "version": version}
-        payload.write(json.dumps(header).encode() + b"\n")
-        payload.write(code)
-        with archive.open("rb") as stream:
-            shutil.copyfileobj(stream, payload)
-        payload.seek(0)
+    with upload_payload(archive, version, checksum) as payload:
         value = ssh.execute("python3 -c " + shlex.quote(BOOTSTRAP), payload, timeout=1800)
     return safe_result(value, version)
 

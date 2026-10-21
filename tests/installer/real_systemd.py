@@ -22,6 +22,9 @@ REPO = Path(__file__).resolve().parents[2]
 spec = importlib.util.spec_from_file_location("installer", REPO / "scripts/installer/remote.py")
 installer = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(installer)
+spec_transport = importlib.util.spec_from_file_location("transport", REPO / "scripts/installer/deploy.py")
+transport = importlib.util.module_from_spec(spec_transport)
+spec_transport.loader.exec_module(transport)
 SITE_PATHS = (installer.BASE, installer.CONFIG, installer.DATA, installer.CACHE, installer.BACKUPS)
 
 
@@ -34,8 +37,8 @@ def command(args, check=True):
 
 def apply(archive, version, expected_success=True):
     checksum = installer.digest(archive)
-    result = command(["python3", REPO / "scripts/installer/remote.py", "--archive", archive,
-                      "--sha256", checksum, "--version", version], check=False)
+    with transport.upload_payload(archive, version, checksum) as payload:
+        result = subprocess.run(["python3", "-c", transport.BOOTSTRAP], stdin=payload, capture_output=True, text=True, timeout=1500)
     assert result.returncode == (0 if expected_success else 1), "Unexpected installer outcome: " + result.stdout[:200]
     value = json.loads(result.stdout)
     print("CI_INSTALL: " + json.dumps(value), flush=True)

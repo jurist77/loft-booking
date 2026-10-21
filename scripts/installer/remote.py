@@ -237,6 +237,7 @@ CPUAccounting=true
 IOAccounting=true
 CPUWeight=50
 IOWeight=50
+OOMScoreAdjust=500
 
 [Install]
 WantedBy=multi-user.target
@@ -258,6 +259,7 @@ def helper(release, arguments, code):
                "--property=RuntimeMaxSec=120", "--property=UMask=0077", "--property=NoNewPrivileges=true",
                "--property=CapabilityBoundingSet=", "--property=PrivateDevices=true", "--property=PrivateTmp=true",
                "--property=ProtectSystem=strict", "--property=ProtectHome=true", "--property=ProtectProc=invisible",
+               "--property=CPUWeight=25", "--property=IOWeight=25", "--property=Nice=10", "--property=OOMScoreAdjust=500",
                "--setenv=APP_MODE=server", "--setenv=SQLITE_PATH=/data/studio.sqlite",
                "/usr/bin/node", "--conditions=react-server", *arguments]
     try:

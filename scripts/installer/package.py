@@ -29,7 +29,11 @@ def copy_tree(source, destination):
     # Dereference only links staying inside the source tree. No escaping tar links.
     for entry in source.rglob("*"):
         if entry.is_symlink() and not entry.resolve().is_relative_to(source.resolve()):
-            raise RuntimeError("SOURCE_SYMLINK_ESCAPE")
+            # Turbopack generates an external-package link here. Materialize only
+            # targets in our clean npm-ci node_modules, never arbitrary host files.
+            generated_external = source == Path(".next-server") and entry.resolve().is_relative_to(Path("node_modules").resolve())
+            if not generated_external:
+                raise RuntimeError("SOURCE_SYMLINK_ESCAPE")
     shutil.copytree(source, destination, symlinks=False, ignore=ignore)
 
 
@@ -102,4 +106,9 @@ if __name__ == "__main__":
     parser.add_argument("--output", required=True, type=Path)
     parser.add_argument("--version", required=True)
     args = parser.parse_args()
-    build(args.output, args.version)
+    try:
+        build(args.output, args.version)
+    except Exception as error:
+        code = str(error) if isinstance(error, RuntimeError) and re.fullmatch(r"[A-Z0-9_]+", str(error)) else "PACKAGE_BUILD_FAILED"
+        print("::error title=SERVER package::" + code)
+        raise SystemExit(1) from None
