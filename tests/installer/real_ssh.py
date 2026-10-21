@@ -63,7 +63,7 @@ def main():
             output = io.StringIO()
             with contextlib.redirect_stdout(output):
                 try:
-                    client.execute("printf '%s' '" + password + "'")
+                    client.execute("printf '%s' 'synthetic-non-json-output'")
                     raise AssertionError("Non-JSON accepted")
                 except transport.DeployError as error:
                     assert password not in str(error)

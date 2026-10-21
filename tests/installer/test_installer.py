@@ -26,11 +26,27 @@ def load(name, filename):
 remote = load("remote", "remote.py")
 deploy = load("deploy", "deploy.py")
 packager = load("packager", "package.py")
+sys.path.insert(0, str(SCRIPTS))
+gate = load("gate", "verify-main.py")
+sys.path.pop(0)
 SECRET = "secret-example-not-an-actual-password"
 VERSION = "a" * 40
 
 
 class InstallerTests(unittest.TestCase):
+    def test_main_gate_rejects_other_refs_missing_secret_and_failed_newest_check(self):
+        env = {"STUDIO_SERVER_IP": "203.0.113.9", "STUDIO_PASSWORD_PRESENT": "true", "GITHUB_SHA": VERSION,
+               "GITHUB_REF": "refs/heads/main", "GITHUB_REPOSITORY": "owner/repo"}
+        names = ("Check backend foundation", "Check read-only VPS audit tool", "Check universal installer")
+        runs = [{"name": name, "databaseId": i, "status": "completed", "conclusion": "success"} for i, name in enumerate(names)]
+        def check(overrides, checks, expected):
+            with patch.dict(os.environ, {**env, **overrides}), patch.object(gate.subprocess, "run", return_value=subprocess.CompletedProcess([], 0, json.dumps(checks))), contextlib.redirect_stdout(io.StringIO()):
+                self.assertEqual(gate.main(), expected)
+        import os
+        check({}, runs, 0)
+        check({"GITHUB_REF": "refs/heads/feature"}, runs, 1)
+        check({"STUDIO_PASSWORD_PRESENT": "false"}, runs, 1)
+        check({}, runs + [{"name": names[0], "databaseId": 99, "status": "completed", "conclusion": "failure"}], 1)
     def test_generated_next_external_link_materialized_but_host_escape_refused(self):
         import os
         with tempfile.TemporaryDirectory() as temporary:
@@ -54,7 +70,7 @@ class InstallerTests(unittest.TestCase):
     def test_literal_ip_only_ipv4_and_ipv6(self):
         self.assertEqual(deploy.server_ip("203.0.113.9"), "203.0.113.9")
         self.assertEqual(deploy.server_ip("2001:0db8:0000::2"), "2001:db8::2")
-        for value in ("host.example", "127.0.0.1", "::1", "::", "0.0.0.0", "fe80::1%eth0", "x;id", "--help", "1.2.3.4\n", "224.0.0.1"):
+        for value in ("host.example", "127.0.0.1", "::1", "::", "0.0.0.0", "fe80::1%eth0", "x;id", "--help", "1.2.3.4\n", "224.0.0.1", "::ffff:127.0.0.1"):
             with self.assertRaises(deploy.DeployError, msg=value):
                 deploy.server_ip(value)
 

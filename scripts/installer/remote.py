@@ -19,6 +19,7 @@ import signal
 import socket
 import stat
 import subprocess
+import sys
 import tarfile
 import tempfile
 import time
@@ -65,6 +66,7 @@ def run(args, code="COMMAND_FAILED", timeout=60, check=True):
 
 def host_facts():
     require(os.geteuid() == 0, "ROOT_REQUIRED")
+    require(sys.version_info >= (3, 12), "PYTHON_3_12_REQUIRED")
     values = {}
     try:
         for line in Path("/etc/os-release").read_text().splitlines():
@@ -324,9 +326,16 @@ def install(archive_path, checksum, version):
             owned_directory(path, account.pw_uid, account.pw_gid)
     if state and state.get("current") and state.get("version") == version:
         require(private_environment() == environment_text(state["port"]), "ENVIRONMENT_CHANGED_OUTSIDE_INSTALLER")
-        health(state["port"])
-        return {"status": "SUCCESS", "version": version, "operation": "already-current", "migrations": "unchanged",
-                "service": "active", "health": 200, "listener": f"127.0.0.1:{state['port']}"}
+        try:
+            health(state["port"], timeout=5)
+        except InstallError as error:
+            if error.code != "APP_HEALTH_FAILED":
+                raise
+            # An unhealthy/stopped instance is redeployed through the backup path.
+        else:
+            run(["systemctl", "enable", SERVICE], "SERVICE_ENABLE_FAILED")
+            return {"status": "SUCCESS", "version": version, "operation": "already-current", "migrations": "unchanged",
+                    "service": "active-enabled", "health": 200, "listener": f"127.0.0.1:{state['port']}"}
     # Conservative admission thresholds, not an application peak-memory guarantee.
     memory = re.search(r"^MemAvailable:\s+(\d+)", Path("/proc/meminfo").read_text(), re.M)
     require(memory and int(memory[1]) >= 512 * 1024, "MEMORY_HEADROOM_BELOW_512_MIB")

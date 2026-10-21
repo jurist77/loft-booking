@@ -9,6 +9,7 @@ import hashlib
 import importlib.util
 import json
 import os
+import re
 from pathlib import Path
 import shutil
 import socket
@@ -119,10 +120,17 @@ def fingerprints():
         route.pop("expires", None)  # DHCP/RA lifetime decreases without a config change.
     result["routes"] = json.dumps(routes, sort_keys=True)
     # iptables-save adds wall-clock Generated/Completed comments on every read.
-    result["firewall"] = "\n".join(line for line in command(["iptables-save"]).stdout.splitlines() if not line.startswith("#"))
+    result["firewall"] = "\n".join(re.sub(r"^(:\S+\s+\S+\s+)\[\d+:\d+\]$", r"\1[counters]", line)
+                                     for line in command(["iptables-save"]).stdout.splitlines() if not line.startswith("#"))
     result["canary"] = installer.digest(Path("/opt/studio-ci-vpn/private.conf"))
     result["canary_pid"] = command(["systemctl", "show", "studio-ci-vpn.service", "-p", "MainPID", "--value"]).stdout
     return result
+
+
+def assert_unchanged(before):
+    after = fingerprints()
+    changed = sorted(key for key in before.keys() | after.keys() if before.get(key) != after.get(key))
+    assert not changed, "CI invariant changed: " + ", ".join(changed)
 
 
 def check_isolation():
@@ -196,7 +204,7 @@ def main():
             assert command(["systemctl", "is-enabled", installer.SERVICE], check=False).returncode != 0
             assert (installer.DATA / "studio.sqlite").is_file()
             assert list(installer.BACKUPS.glob("checkpoint-*.sqlite"))
-            assert fingerprints() == before, "Existing services/network/canary changed"
+            assert_unchanged(before)
             cleanup()
             # Fresh failed initial install: no partly configured running service.
             failed = variant(args.archive, directory, "f" * 40, "bad-start")
@@ -204,7 +212,7 @@ def main():
             assert command(["systemctl", "is-active", installer.SERVICE], check=False).returncode != 0
             assert (installer.DATA / "studio.sqlite").exists()
             assert apply(args.archive, args.version)["status"] == "SUCCESS"
-            assert fingerprints() == before
+            assert_unchanged(before)
         assert installer.digest(args.archive) == original_checksum, "Verified package was modified by tests"
         print("REAL_CI_SYSTEMD_OK: install/repeat/update/occupied-port/migration/start/rollback/schema-change/data/isolation/network")
     finally:

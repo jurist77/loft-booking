@@ -68,3 +68,4 @@ jobs:
             ${{ runner.temp }}/server.tar.gz.sha256
           if-no-files-found: error
           retention-days: 7
+          compression-level: 0

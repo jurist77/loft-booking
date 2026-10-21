@@ -14,7 +14,7 @@ import sys
 
 HERE = Path(__file__).resolve().parent
 SAFE_CODES = {
-    "ROOT_REQUIRED", "UBUNTU_24_04_REQUIRED", "ARCH_UNSUPPORTED", "SYSTEMD_REQUIRED", "BASE_TOOL_MISSING",
+    "ROOT_REQUIRED", "UBUNTU_24_04_REQUIRED", "ARCH_UNSUPPORTED", "SYSTEMD_REQUIRED", "BASE_TOOL_MISSING", "PYTHON_3_12_REQUIRED",
     "SYSTEMD_UNAVAILABLE", "ARTIFACT_CHECKSUM_MISMATCH", "ARTIFACT_ARCH_MISMATCH", "ARTIFACT_OS_MISMATCH",
     "ARTIFACT_NODE_MISMATCH", "VERSION_MISMATCH", "NATIVE_SQLITE_UNAVAILABLE", "RUNTIME_UNAVAILABLE", "SANDBOX_RUNTIME_UNAVAILABLE",
     "MEMORY_HEADROOM_BELOW_512_MIB", "DISK_HEADROOM_INSUFFICIENT", "INSTALL_ALREADY_RUNNING",
@@ -90,7 +90,8 @@ def server_ip(value):
         if "%" in value:
             raise ValueError()
         address = ipaddress.ip_address(value)
-        if address.is_unspecified or address.is_multicast or address.is_loopback or address.is_link_local:
+        effective = getattr(address, "ipv4_mapped", None) or address
+        if effective.is_unspecified or effective.is_multicast or effective.is_loopback or effective.is_link_local:
             raise ValueError()
         return address.compressed
     except ValueError:
@@ -182,7 +183,8 @@ def deploy(address, artifacts, version, password):
         raise DeployError("INVALID_VERSION")
     ssh = SSH(server_ip(address), password)
     with (HERE / "remote.py").open("rb") as source:
-        probe = ssh.execute("python3 - --probe", source)
+        probe_command = "if ! python3 -c 'import sys;sys.exit(0 if sys.version_info >= (3,12) else 1)' >/dev/null 2>&1; then printf '%s' '{\"status\":\"FAILED\",\"code\":\"PYTHON_3_12_REQUIRED\"}'; exit 1; fi; exec python3 - --probe"
+        probe = ssh.execute(probe_command, source)
     if probe.get("status") != "CONNECTED" or probe.get("arch") not in ("x64", "arm64"):
         raise DeployError("REMOTE_PROTOCOL_FAILED")
     print("SSH_CONNECTED; Ubuntu 24.04; architecture=" + probe["arch"], flush=True)

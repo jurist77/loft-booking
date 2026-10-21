@@ -25,7 +25,7 @@ def copy_tree(source, destination):
         return [name for name in names if name.startswith(".env") or name in
                 (".git", "cache", "__pycache__", "test-results", "playwright-report") or
                 any(marker in name for marker in ("linuxmusl", "-musl", "win32", "darwin", "-arm64" if platform.machine() == "x86_64" else "-x64")) or
-                name.endswith((".test.ts", ".sqlite", ".sqlite-wal", ".sqlite-shm", ".pem", ".key"))]
+                name.endswith((".test.ts", ".sqlite", ".sqlite-wal", ".sqlite-shm", ".db", ".db-wal", ".db-shm", ".dump", ".partial", ".pem", ".key"))]
     # Dereference only links staying inside the source tree. No escaping tar links.
     for entry in source.rglob("*"):
         if entry.is_symlink() and not entry.resolve().is_relative_to(source.resolve()):
