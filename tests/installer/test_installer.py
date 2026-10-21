@@ -110,6 +110,15 @@ class InstallerTests(unittest.TestCase):
                     deploy.SSH("203.0.113.9", SECRET).execute("true")
                 self.assertNotIn(SECRET, str(error.exception))
 
+    def test_single_prompt_password_rejection_can_return_255(self):
+        with patch.object(deploy.subprocess, "Popen") as popen:
+            child = popen.return_value
+            child.communicate.return_value = (b"", b"root@host: Permission denied (password). " + SECRET.encode())
+            child.returncode = 255
+            child.poll.return_value = 255
+            with self.assertRaisesRegex(deploy.DeployError, "^SSH_AUTH_FAILED$"):
+                deploy.SSH("203.0.113.9", SECRET).execute("true")
+
     def test_success_is_whitelisted_and_requires_health_200(self):
         result = {"status": "SUCCESS", "version": VERSION, "health": 200, "service": "active-enabled",
                   "migrations": "verified", "operation": "install", "listener": "127.0.0.1:3100", "secret": SECRET}

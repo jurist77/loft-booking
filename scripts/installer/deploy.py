@@ -116,10 +116,14 @@ class SSH:
         child = None
         try:
             child = subprocess.Popen(self.arguments(command), stdin=stream, stdout=subprocess.PIPE,
-                                     stderr=subprocess.DEVNULL, start_new_session=True,
+                                     stderr=subprocess.PIPE, start_new_session=True,
                                      env={"PATH": os.environ.get("PATH", "/usr/bin:/bin"), "LC_ALL": "C", "SSHPASS": self.password})
-            output, _ = child.communicate(timeout=timeout)
-            if child.returncode == 5:
+            output, diagnostic = child.communicate(timeout=timeout)
+            # With one password prompt sshpass may propagate ssh's 255 instead
+            # of 5. Inspect fixed C-locale markers only; never print stderr.
+            auth_denied = any(marker in (diagnostic or b"") for marker in
+                              (b"Permission denied (", b"Permission denied, please try again.", b"Authentication failed."))
+            if child.returncode == 5 or (child.returncode == 255 and auth_denied):
                 raise DeployError("SSH_AUTH_FAILED")
             if child.returncode == 255:
                 raise DeployError("SSH_CONNECTION_FAILED")

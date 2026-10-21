@@ -53,12 +53,12 @@ jobs:
         run: |
           sudo apt-get update -qq
           sudo apt-get install -y --no-install-recommends sshpass openssh-server
+      - name: Real local SSH authentication and transport tests on CI only
+        run: sudo env STUDIO_INSTALLER_CI=1 GITHUB_ACTIONS=true python3 tests/installer/real_ssh.py
       - name: Real systemd installation, updates, failures and schema-aware rollback on CI only
         env:
           STUDIO_SOURCE_SHA: ${{ inputs.source_sha }}
         run: sudo env STUDIO_INSTALLER_CI=1 GITHUB_ACTIONS=true python3 tests/installer/real_systemd.py --archive "$RUNNER_TEMP/server.tar.gz" --version "$STUDIO_SOURCE_SHA"
-      - name: Real local SSH authentication and transport tests on CI only
-        run: sudo env STUDIO_INSTALLER_CI=1 GITHUB_ACTIONS=true python3 tests/installer/real_ssh.py
       - name: Publish only the verified immutable package (never VPS data)
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:

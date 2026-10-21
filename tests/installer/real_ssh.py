@@ -51,8 +51,15 @@ def main():
             with socket.socket() as reserve:
                 reserve.bind(("127.0.0.1", 0))
                 port = reserve.getsockname()[1]
+            ipv6 = False
+            try:
+                with socket.socket(socket.AF_INET6) as probe:
+                    probe.bind(("::1", port))
+                    ipv6 = True
+            except OSError:
+                pass
             config = root / "sshd_config"
-            config.write_text(f"Port {port}\nListenAddress 127.0.0.1\nHostKey {key}\nPidFile {root}/pid\n"
+            config.write_text(f"Port {port}\nListenAddress 127.0.0.1\n" + ("ListenAddress ::1\n" if ipv6 else "") + f"HostKey {key}\nPidFile {root}/pid\n"
                               f"PasswordAuthentication yes\nKbdInteractiveAuthentication no\nUsePAM no\nPermitRootLogin no\nAllowUsers {user}\nLogLevel QUIET\n")
             Path("/run/sshd").mkdir(exist_ok=True)
             PHASE = "validate-test-sshd"
@@ -69,12 +76,16 @@ def main():
             PHASE = "valid-password"
             result = client.execute("printf '%s' '{\"status\":\"CONNECTED\"}'")
             assert result == {"status": "CONNECTED"}
+            if ipv6:
+                PHASE = "ipv6-valid-password"
+                result = transport.SSH("::1", password, user=user, port=port).execute("printf '%s' '{\"status\":\"CONNECTED\"}'")
+                assert result == {"status": "CONNECTED"}
             PHASE = "wrong-password"
             try:
                 transport.SSH("127.0.0.1", "wrong-" + password, user=user, port=port).execute("true")
                 raise AssertionError("Wrong password accepted")
             except transport.DeployError as error:
-                assert str(error) == "SSH_AUTH_FAILED"
+                assert str(error) == "SSH_AUTH_FAILED", "expected SSH_AUTH_FAILED, got " + str(error)
             # A hostile SSH stdout/error cannot put the password into public logs.
             output = io.StringIO()
             PHASE = "malformed-output"
@@ -93,7 +104,7 @@ def main():
                 raise AssertionError("Stopped SSH server accepted connection")
             except transport.DeployError as error:
                 assert str(error) == "SSH_CONNECTION_FAILED"
-            print("REAL_CI_SSH_OK: password authentication, wrong password, refused connection, secret-free diagnostics")
+            print("::notice title=SSH CI::REAL_CI_SSH_OK: password authentication, wrong password, refused connection, secret-free diagnostics; IPv6=" + ("passed" if ipv6 else "unavailable"))
         finally:
             if daemon and daemon.poll() is None:
                 daemon.terminate()
