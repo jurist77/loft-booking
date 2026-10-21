@@ -1,0 +1,61 @@
+name: Install Studio 19.25
+
+on:
+  workflow_dispatch:
+    inputs:
+      server_ip:
+        description: "VPS IPv4 or IPv6 (Ubuntu 24.04; SSH root:22)"
+        type: string
+        required: true
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: studio-install-${{ inputs.server_ip }}
+  cancel-in-progress: false
+
+jobs:
+  validate:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - name: Require literal IP, main and successful checks for this exact SHA
+        env:
+          STUDIO_SERVER_IP: ${{ inputs.server_ip }}
+          GH_TOKEN: ${{ github.token }}
+        run: python3 scripts/installer/verify-main.py
+  packages:
+    needs: validate
+    uses: ./.github/workflows/installer-package.yml
+    with:
+      source_sha: ${{ github.sha }}
+  install:
+    needs: [validate, packages]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
+        with:
+          pattern: studio-server-*
+          path: ${{ runner.temp }}/studio-packages
+      - name: SSH password transport tools (runner only)
+        run: |
+          if ! command -v sshpass >/dev/null; then
+            sudo apt-get update -qq
+            sudo apt-get install -y --no-install-recommends sshpass
+          fi
+      - name: Install or update only Studio; SSH host identity verification disabled by owner
+        env:
+          STUDIO_SERVER_IP: ${{ inputs.server_ip }}
+          STUDIO_SSH_PASSWORD: ${{ secrets.STUDIO_SSH_PASSWORD }}
+          STUDIO_SOURCE_SHA: ${{ github.sha }}
+        run: python3 scripts/installer/deploy.py --artifacts "$RUNNER_TEMP/studio-packages" --version "$STUDIO_SOURCE_SHA"
