@@ -14,4 +14,6 @@ Root создаёт только собственного непривилеги
 
 На настоящих VPS/SSH и рабочем backup repo ничего не запускалось. Не проверены реальные ресурсы/VPN peaks/reboot/публичный маршрут/права и квоты backup repo. Отказ после несовместимой committed migration оставляет сайт остановленным, не делает destructive DB rollback. Локальные recovery/release/checkpoint каталоги требуют отдельной политики очистки. Schedule/email GitHub не дают SLA.
 
+Native CI дополнительно выявил остановку snapshot перед update: readonly проверка временного SQLite backup оставляла orphan partial WAL/SHM. Причина воспроизведена на реальной SQLite; verifier собственного temporary output исправлен, production source WAL/FULL не ослаблены, integration regression проверяет отсутствие orphan files. Итог native CI должен подтверждать именно последнюю редакцию.
+
 Полные файлы, матрица требований, тесты и оставшиеся ограничения: `docs/acceptance/v2.5.2/README.md`. Пошаговая настройка, Install/Daily/Restore и recovery: `docs/universal-installer.md`.

@@ -59,7 +59,14 @@ def apply(archive, version, expected_success=True, restore_bundle=None):
                 with plain.open("wb") as output:
                     snap = subprocess.run(["python3", "-", "--action", "snapshot", "--purpose", "restore" if restore_bundle else "update", "--hold"],
                                           input=transport.remote_source(), stdout=output, stderr=subprocess.DEVNULL, timeout=180)
-                assert snap.returncode == 0, "CI consistent snapshot failed"
+                if snap.returncode:
+                    code = "SNAPSHOT_FAILED"
+                    if plain.stat().st_size < 1000:
+                        try:
+                            candidate = json.loads(plain.read_text()).get("code", "")
+                            if re.fullmatch(r"[A-Z0-9_]+", candidate): code = candidate
+                        except (ValueError, UnicodeError): pass
+                    raise AssertionError("CI consistent snapshot failed: " + code)
                 manifest = lifecycle_backup.validate_bundle(plain)
                 cipher = Path(folder) / "snapshot.tar.gz.gpg"
                 lifecycle_backup.crypt(plain, cipher, PHRASE)

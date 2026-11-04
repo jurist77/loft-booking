@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, expect, it } from "vitest";
-import { chmodSync, existsSync, linkSync, lstatSync, mkdtempSync, readFileSync, renameSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, linkSync, lstatSync, mkdtempSync, readFileSync, readdirSync, renameSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { spawn } from "node:child_process";
@@ -136,12 +136,16 @@ it("fails safely on readonly or exposed file/directory permissions and recovers"
 it("backs up committed WAL data online and restores a verified independent file", async () => {
   sqlInsert("in-wal");
   const snapshot = join(folder, "snapshot.sqlite"); await backupDatabase(db, snapshot);
+  expect(readdirSync(folder).filter((name) => name.includes(".partial.sqlite"))).toEqual([]);
+  expect(db.pragma("journal_mode", { simple: true })).toBe("wal");
+  expect(db.pragma("synchronous", { simple: true })).toBe(2);
   sqlInsert("later", start + 2 * hour, start + 3 * hour);
   const restoredPath = join(folder, "restored.sqlite"); await restoreDatabase(snapshot, restoredPath);
   const restored = openDatabase(databaseSettings({ APP_MODE: "server", SQLITE_PATH: restoredPath }));
   try { assertIntegrity(restored, true); expect(restored.prepare("SELECT id FROM bookings").all()).toEqual([{ id: "in-wal" }]); }
   finally { restored.close(); }
   expect(lstatSync(snapshot).mode & 0o777).toBe(0o600);
+  expect(readdirSync(folder).filter((name) => name.includes(".partial.sqlite"))).toEqual([]);
 });
 it("can back up while a separate writer commits transactions", async () => {
   db.exec("CREATE TABLE backup_probe(payload BLOB)");

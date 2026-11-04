@@ -37,6 +37,7 @@
 - `scripts/installer/schema.mjs`, `acceptance.mjs`, `verify-main.py`, `verify-version.py`: fingerprint, isolated technical acceptance, exact-SHA CI gates.
 - `tests/installer/`: unit/mock external tests и настоящий CI-only systemd harness. Исторический real_ssh.py сохранён, не вызывается.
 - `src/server/api-security.ts`, `api.test.ts`: opt-in non-loopback HTTP только server + literal IP. HTTPS default/CORS/rate limits/booking rules сохранены.
+- `src/server/backup.ts`, `tests/integration/sqlite.test.ts`: проверка собственного временного SQLite output закрывается без orphan WAL/SHM; интеграционный regression сохраняет WAL/FULL исходной DB.
 - `README.md`, [полная инструкция](../../universal-installer.md), этот отчёт.
 
 ## Выполненные локальные проверки
@@ -63,6 +64,8 @@ Cloud: Node 24.19.0, SQLite 3.53.4, Python 3.12.14, GPG, Chromium; среда н
 Один первый локальный `test:demo:isolation` завершился `INVALID_NODE_DEMO` при startup probe; повторный полный запуск прошёл без изменения или ослабления теста. Точная причина первого transient response не установлена, поэтому это не скрывается за заявлением «всё стабильно». Требуется новый CI и последующая отдельная эксплуатационная приёмка.
 
 Native CI run `41905497186` выявил `TypeError` в новом тестовом receiver adapter: keyword `bundle` вместо `restore_bundle` при framing. Исправлено; локальный regression вызывает тот же adapter с настоящим framed stream и mock внешнего запуска, проверяет архив/code/snapshot/hash/confirmation. Это ошибка тестового вызова, не основание отключать реальные systemd сценарии. Добавлена безопасная location-диагностика исключений CI; требуется успешный повтор текущего SHA.
+
+Следующий run `41906850646` успешно выполнил первую установку/no-op и отклонил consistent snapshot перед update. Причина воспроизведена локально на настоящем better-sqlite3: readonly verifier собственного временного backup output оставлял `.partial.sqlite-wal/-shm`, попадавшие в manifest и нарушавшие точный file set архива. Verifier теперь открывает только свой private temporary output read/write, чтобы SQLite сама убирала свои journals при закрытии. Живая база не копируется вручную, WAL/FULL источника не меняются. Усилен существующий integration test на отсутствие orphan partial files и сохранение PRAGMA WAL/FULL; все 57 проходят. Прежние зелёные CI не считаются доказательством этой последней правки.
 
 При подготовке исправлены: chronological rotation после смены instance; cleanup собственного неподтверждённого draft; nonce/schema-safe release snapshot hold при transfer failure; завершение ephemeral GPG agent без наследования Secrets; проверка полноты и SQLite magic в пакете; fsync staged restore до rename; IPv4-only kernel; проверка ключа до SSH. Старый deploy CLI переведён на общий backup barrier/валидатор результата, чтобы не оставлять обход обязательной копии или устаревший loopback-контракт. Все исходные прикладные тесты сохранены.
 

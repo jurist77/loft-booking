@@ -568,7 +568,10 @@ def main():
         print(json.dumps(result))
         return 0
     except Exception as error:
-        print(json.dumps({"status": "FAILED", "code": error.code if isinstance(error, InstallError) else "INSTALL_FAILED"}))
+        code = error.code if isinstance(error, InstallError) else "INSTALL_FAILED"
+        if type(error).__module__ == "backup" and type(error).__name__ == "BackupError" and re.fullmatch(r"[A-Z0-9_]+", str(error)):
+            code = str(error)
+        print(json.dumps({"status": "FAILED", "code": code}))
         return 1
 
 

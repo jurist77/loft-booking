@@ -53,7 +53,8 @@ class InstallerTests(unittest.TestCase):
                 self.assertEqual(stream.read(), b"")
                 self.assertNotIn(SECRET.encode(), code)
                 return SimpleNamespace(returncode=0, stdout='{"status":"SUCCESS"}')
-            with patch.object(ci.installer, "CONFIG", root / "absent-config"), patch.object(ci.subprocess, "run", side_effect=receiver) as external:
+            with patch.object(ci.installer, "CONFIG", root / "absent-config"), patch.object(ci.subprocess, "run", side_effect=receiver) as external, \
+                    contextlib.redirect_stdout(io.StringIO()):
                 self.assertEqual(ci.apply(archive, VERSION, restore_bundle=restore)["status"], "SUCCESS")
                 self.assertEqual(external.call_count, 1)
 
