@@ -69,6 +69,24 @@ class FakeHost:
 
 
 class MaintenanceTests(unittest.TestCase):
+    def test_legacy_cli_temporary_journals_are_not_part_of_the_completed_backup(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root=Path(directory);host=FakeHost(root);m=Maintenance(host);stream=io.BytesIO()
+            actual=host.helper
+            def legacy_helper(release,arguments,code,**kwargs):
+                actual(release,arguments,code,**kwargs)
+                if arguments[1]=="backup":
+                    target=host.BACKUPS/Path(arguments[-1]).relative_to("/backups")
+                    target.with_name("studio.sqlite.legacy.partial.sqlite-wal").write_bytes(b"")
+                    target.with_name("studio.sqlite.legacy.partial.sqlite-shm").write_bytes(b"synthetic legacy check")
+            host.helper=legacy_helper
+            m.snapshot("daily",output=stream)
+            bundle=root/"snapshot.tar.gz";bundle.write_bytes(stream.getvalue())
+            manifest=validate_bundle(bundle)
+            self.assertIn("studio.sqlite",manifest["files"])
+            self.assertFalse(any(".partial.sqlite" in name for name in manifest["files"]))
+            self.assertTrue(host.active)
+
     def test_daily_failure_resumes_original_service_and_state(self):
         with tempfile.TemporaryDirectory() as directory:
             host=FakeHost(Path(directory));host.fail_backup=True

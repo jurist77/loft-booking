@@ -105,8 +105,13 @@ class Maintenance:
                 for name in ("photos", "settings"):
                     (folder / name).mkdir(mode=0o700)
                     self.copy_private(o.DATA / name, folder / name, account)
-                files = {str(p.relative_to(folder)): {"sha256": file_hash(p), "size": p.stat().st_size}
-                         for p in folder.rglob("*") if p.is_file()}
+                # Match exactly what is archived. Older CLI versions may leave
+                # private temporary verification journals beside the completed
+                # Backup-API output; these are not part of the final snapshot.
+                selected = [folder / "studio.sqlite"]
+                for name in ("photos", "settings"):
+                    selected.extend(p for p in (folder / name).rglob("*") if p.is_file())
+                files = {str(p.relative_to(folder)): {"sha256": file_hash(p), "size": p.stat().st_size} for p in selected}
                 o.require(sum(f["size"] for f in files.values()) < 1500 * 1024**2, "SNAPSHOT_TOO_LARGE")
                 manifest = {"format": 2, "studio": "studio1925", "version": prior["version"], "schema": fingerprint,
                             "instance": prior["instance"], "nonce": nonce, "purpose": purpose,

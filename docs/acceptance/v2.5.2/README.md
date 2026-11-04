@@ -46,7 +46,7 @@ Cloud: Node 24.19.0, SQLite 3.53.4, Python 3.12.14, GPG, Chromium; среда н
 
 | Проверка | Результат |
 | --- | --- |
-| Installer unit/security/backup/restore | 40 passed; реальная криптография и SQLite, внешние действия mock |
+| Installer unit/security/backup/restore | 41 passed; реальная криптография и SQLite, внешние действия mock |
 | `npm test` | 152 passed |
 | `npm run test:integration` | 57 passed, настоящая SQLite |
 | `npm run typecheck`, `npm run lint` | Passed |
@@ -66,6 +66,8 @@ Cloud: Node 24.19.0, SQLite 3.53.4, Python 3.12.14, GPG, Chromium; среда н
 Native CI run `41905497186` выявил `TypeError` в новом тестовом receiver adapter: keyword `bundle` вместо `restore_bundle` при framing. Исправлено; локальный regression вызывает тот же adapter с настоящим framed stream и mock внешнего запуска, проверяет архив/code/snapshot/hash/confirmation. Это ошибка тестового вызова, не основание отключать реальные systemd сценарии. Добавлена безопасная location-диагностика исключений CI; требуется успешный повтор текущего SHA.
 
 Следующий run `41906850646` успешно выполнил первую установку/no-op и отклонил consistent snapshot перед update. Причина воспроизведена локально на настоящем better-sqlite3: readonly verifier собственного временного backup output оставлял `.partial.sqlite-wal/-shm`, попадавшие в manifest и нарушавшие точный file set архива. Verifier теперь открывает только свой private temporary output read/write, чтобы SQLite сама убирала свои journals при закрытии. Живая база не копируется вручную, WAL/FULL источника не меняются. Усилен существующий integration test на отсутствие orphan partial files и сохранение PRAGMA WAL/FULL; все 57 проходят. Прежние зелёные CI не считаются доказательством этой последней правки.
+
+Для обновления с прежнего CLI manifest строится ровно по содержимому архива: завершённый Backup-API output + photos/settings. Оставленные старым verifier временные файлы не становятся частью снимка и удаляются вместе с его private temp directory; source DB/WAL не затрагиваются. Отдельный regression проверяет эту совместимость.
 
 При подготовке исправлены: chronological rotation после смены instance; cleanup собственного неподтверждённого draft; nonce/schema-safe release snapshot hold при transfer failure; завершение ephemeral GPG agent без наследования Secrets; проверка полноты и SQLite magic в пакете; fsync staged restore до rename; IPv4-only kernel; проверка ключа до SSH. Старый deploy CLI переведён на общий backup barrier/валидатор результата, чтобы не оставлять обход обязательной копии или устаревший loopback-контракт. Все исходные прикладные тесты сохранены.
 
