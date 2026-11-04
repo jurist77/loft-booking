@@ -142,6 +142,9 @@ class Maintenance:
                   isinstance(receipt.get("tag"), str) and receipt["tag"].startswith("studio1925-preupdate-") and
                   len(receipt.get("cipher_sha256", "")) == 64, "VERIFIED_OFFSITE_BACKUP_REQUIRED")
         prior = pending["prior"]
+        # A reboot/manual start can resume the source while the runner uploads.
+        # Refuse the old checkpoint before any migration or live-data swap.
+        o.require(o.run(["systemctl", "is-active", o.SERVICE], check=False) != 0, "MAINTENANCE_SOURCE_ACTIVE")
         o.require(o.schema(o.BASE / "releases" / prior["current"]) == pending["schema"], "MAINTENANCE_SCHEMA_CHANGED")
         return prior
 

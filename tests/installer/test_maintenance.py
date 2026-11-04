@@ -88,6 +88,10 @@ class MaintenanceTests(unittest.TestCase):
             self.assertEqual(m.check_receipt(host.state,receipt,"update")["phase"],"ready")
             for bad in ({**receipt,"verified":False},{**receipt,"nonce":"wrong"},{**receipt,"bundle_sha256":"wrong"}):
                 with self.assertRaises(InstallError): m.check_receipt(host.state,bad,"update")
+            host.active=True  # Simulate a reboot/manual restart during upload.
+            with self.assertRaisesRegex(InstallError,"MAINTENANCE_SOURCE_ACTIVE"):
+                m.check_receipt(host.state,receipt,"update")
+            host.active=False
             m.abort(pending["nonce"])
             self.assertTrue(host.active)
 
