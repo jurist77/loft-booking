@@ -213,13 +213,26 @@ def inspect_archive(archive_path, expected_sha, version, arch):
         return manifest
 
 
+def ipv6_available():
+    if not socket.has_ipv6:
+        return False
+    try:
+        with socket.socket(socket.AF_INET6, socket.SOCK_STREAM) as probe:
+            probe.bind(("::", 0))
+        return True
+    except OSError:
+        # Python may support IPv6 while it is disabled on this particular VPS.
+        return False
+
+
 def choose_port(preferred=None):
+    v6_enabled = ipv6_available()
     for port in ((preferred,) if preferred is not None else (3000, *range(3100, 3200))):
         with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as probe:
             try:
                 probe.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
                 probe.bind(("0.0.0.0", port))
-                if socket.has_ipv6:
+                if v6_enabled:
                     with socket.socket(socket.AF_INET6, socket.SOCK_STREAM) as v6:
                         v6.setsockopt(socket.IPPROTO_IPV6, socket.IPV6_V6ONLY, 1)
                         v6.bind(("::", port))
@@ -246,7 +259,7 @@ WorkingDirectory=/app
 MountAPIVFS=true
 BindPaths={DATA}:/data {CACHE}:/app/.next-server/cache {DATA}/photos:/app/public/images
 EnvironmentFile={CONFIG}/server.env
-ExecStart=/usr/bin/node /app/node_modules/next/dist/bin/next start --hostname {"::" if socket.has_ipv6 else "0.0.0.0"} --port {port}
+ExecStart=/usr/bin/node /app/node_modules/next/dist/bin/next start --hostname {"::" if ipv6_available() else "0.0.0.0"} --port {port}
 Restart=on-failure
 RestartSec=5
 TimeoutStopSec=30

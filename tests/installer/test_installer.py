@@ -35,6 +35,17 @@ VERSION = "a" * 40
 
 
 class InstallerTests(unittest.TestCase):
+    def test_ipv4_only_kernel_is_not_mistaken_for_all_ports_occupied(self):
+        actual = socket.socket
+        def ipv4_only(family=socket.AF_INET, *args, **kwargs):
+            if family == socket.AF_INET6:
+                raise OSError("synthetic IPv6 disabled")
+            return actual(family, *args, **kwargs)
+        with patch.object(socket, "has_ipv6", True), patch.object(socket, "socket", side_effect=ipv4_only):
+            self.assertFalse(remote.ipv6_available())
+            self.assertIn(remote.choose_port(), (3000, *range(3100, 3200)))
+            self.assertIn("--hostname 0.0.0.0", remote.service_text(Path("/opt/studio1925/releases/fixture"), 3100))
+
     def test_final_package_audit_rejects_missing_files_secrets_and_disguised_database(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
