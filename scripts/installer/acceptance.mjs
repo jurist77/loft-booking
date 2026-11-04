@@ -39,14 +39,14 @@ try {
   const db = openDatabase(settings); try { await migrate(db, "migrations/sqlite"); } finally { db.close(); }
   await start();
   const date = new Date(Date.now() + 2 * 86400000).toISOString().slice(0, 10);
-  const available = await fetch(origin + "/api/availability?date=" + date);
+  const available = await fetch(origin + "/api/availability?date=" + date, { signal: AbortSignal.timeout(5000) });
   if (available.status !== 200 || (await available.json()).busy.length !== 0) throw new Error("AVAILABILITY_FAILED");
   const body = { requestId: randomUUID(), resourceId: "studio-19-25", date, start: "12:00", end: "13:00",
     firstName: "Тестовый", lastName: "Персонаж", phone: "+79991234567" };
-  const send = (data) => fetch(origin + "/api/bookings", { method: "POST", headers: { "Content-Type": "application/json", Origin: origin }, body: JSON.stringify(data) });
+  const send = (data) => fetch(origin + "/api/bookings", { method: "POST", headers: { "Content-Type": "application/json", Origin: origin }, body: JSON.stringify(data), signal: AbortSignal.timeout(5000) });
   if ((await send(body)).status !== 201 || (await send({ ...body, requestId: randomUUID() })).status !== 409) throw new Error("BOOKING_CONFLICT_FAILED");
   await stop(); await start();
-  const busy = await (await fetch(origin + "/api/availability?date=" + date)).json();
+  const busy = await (await fetch(origin + "/api/availability?date=" + date, { signal: AbortSignal.timeout(5000) })).json();
   if (busy.busy.length !== 1 || busy.busy[0].start !== "12:00") throw new Error("PERSISTENCE_FAILED");
   console.log("TECHNICAL_ACCEPTANCE_OK: isolated SQLite, real HTTP, booking/conflict/restart");
 } catch {

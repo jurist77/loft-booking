@@ -85,7 +85,8 @@ def crypt(source, destination, passphrase, decrypt=False):
             finally:
                 # Kill only the agent belonging to our unique ephemeral home.
                 subprocess.run(["gpgconf", "--homedir", home, "--kill", "gpg-agent"], stdout=subprocess.DEVNULL,
-                               stderr=subprocess.DEVNULL, timeout=15, check=False)
+                               stderr=subprocess.DEVNULL, timeout=15, check=False,
+                               env={"PATH": os.environ.get("PATH", "/usr/bin:/bin"), "LC_ALL": "C"})
             if result.returncode:
                 destination.unlink(missing_ok=True)
                 raise BackupError("DECRYPTION_FAILED" if decrypt else "ENCRYPTION_FAILED")
