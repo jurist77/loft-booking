@@ -37,6 +37,27 @@ def copy_tree(source, destination):
     shutil.copytree(source, destination, symlinks=False, ignore=ignore)
 
 
+def audit_root(root):
+    """Reject runtime data/credentials; inspect the final tree, not just inputs."""
+    required = ("usr/bin/node", "app/.next-server/BUILD_ID", "app/package.json", "app/next.config.ts",
+                "app/node_modules/next/dist/bin/next", "app/scripts/database.mjs",
+                "app/scripts/installer/acceptance.mjs", "app/scripts/installer/schema.mjs")
+    if any(not (root / name).is_file() for name in required) or not list((root / "app/migrations/sqlite").glob("*.sql")):
+        raise RuntimeError("PACKAGE_INCOMPLETE")
+    for path in root.rglob("*"):
+        if path.is_symlink():
+            raise RuntimeError("PACKAGE_SYMLINK_FORBIDDEN")
+        if not path.is_file():
+            continue
+        name = path.name.lower()
+        if (name.startswith(".env") or name.endswith((".sqlite", ".sqlite-wal", ".sqlite-shm", ".db", ".db-wal", ".db-shm", ".dump", ".pem", ".key")) or
+                any(part in (".git", "__pycache__") for part in path.parts)):
+            raise RuntimeError("PACKAGE_PRIVATE_FILE_FORBIDDEN")
+        with path.open("rb") as stream:
+            if stream.read(16) == b"SQLite format 3\x00":
+                raise RuntimeError("PACKAGE_SQLITE_DATA_FORBIDDEN")
+
+
 def build(destination, version):
     if not re.fullmatch(r"[0-9a-f]{40}", version):
         raise RuntimeError("INVALID_VERSION")
@@ -90,6 +111,7 @@ def build(destination, version):
         if not node_license.is_file():
             raise RuntimeError("NODE_LICENSE_MISSING")
         shutil.copyfile(node_license, root / "licenses/Node-LICENSE")
+        audit_root(root)
         migrations = {p.name: sha(p) for p in sorted((app / "migrations/sqlite").glob("*.sql"))}
         manifest = {"format": 1, "version": version, "os": "ubuntu", "os_version": "24.04", "arch": arch,
                     "node": NODE_VERSION, "node_abi": "137", "mode": "server", "migrations": migrations,

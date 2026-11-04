@@ -96,6 +96,67 @@ def bundle(directory, day=1, nonce=None):
 
 
 class BackupTests(unittest.TestCase):
+    def test_rotation_uses_time_across_instances_and_deletes_release_and_tag(self):
+        store = FakeStore()
+        with tempfile.TemporaryDirectory() as folder:
+            folder = Path(folder)
+            cipher = folder / "snapshot.tar.gz.gpg"; cipher.write_bytes(b"mock ciphertext")
+            for day in range(1, 9):
+                _, manifest = bundle(folder, day)
+                # The older server sorts AFTER the newer server lexically.
+                manifest["instance"] = "f" * 32 if day < 5 else "1" * 32
+                backup.publish(store, cipher, manifest, "daily")
+            self.assertEqual(len(store.items), 7)
+            self.assertTrue(any("20261108T" in r["tag_name"] for r in store.items))
+            self.assertFalse(any("20261101T" in r["tag_name"] for r in store.items))
+        client = backup.GitHubStore("owner/private-backups", "synthetic-token")
+        release = store.items[0]
+        with patch.object(client, "api") as api:
+            client.delete(release)
+        self.assertEqual(api.call_args_list[0].args, (f"/releases/{release['id']}", "DELETE"))
+        self.assertEqual(api.call_args_list[1].args, ("/git/refs/tags/" + release["tag_name"], "DELETE"))
+
+    def test_noop_does_not_backup_or_restart_and_public_access_is_separate(self):
+        from unittest.mock import Mock
+        peer = Mock(address="192.0.2.1")
+        peer.info.return_value = {"installed": True, "version": "b" * 40, "arch": "x64"}
+        peer.install.return_value = {"status": "SUCCESS", "operation": "already-current", "port": 3100, "health": 200}
+        with patch.object(manage, "public_access", return_value="unreachable"):
+            result = manage.run_install(peer, FakeStore(), PHRASE, Path("/synthetic"), "b" * 40)
+        peer.snapshot.assert_not_called()
+        peer.abort.assert_not_called()
+        self.assertEqual(result["health"], 200)
+        self.assertEqual(result["public_access"], "unreachable")
+
+    def test_only_confirmed_restore_can_preserve_locally_when_offsite_fails(self):
+        from unittest.mock import Mock
+        peer = Mock(address="192.0.2.1")
+        peer.info.return_value = {"installed": True, "version": "a" * 40, "arch": "x64"}
+        peer.snapshot.side_effect = backup.BackupError("SNAPSHOT_FAILED")
+        peer.install.return_value = {"status": "SUCCESS", "operation": "restore", "port": 3100, "health": 200}
+        with patch.object(manage, "public_access", return_value="unreachable"):
+            result = manage.run_install(peer, FakeStore(), PHRASE, Path("/synthetic"), "b" * 40, bundle=Path("/validated-bundle"))
+        self.assertIn("local_original_directory_retained", result["pre_restore_preservation"])
+        self.assertEqual(peer.install.call_args.args[2], {"unavailable": True})
+        with patch.dict(os.environ, {"STUDIO_BACKUP_REPOSITORY": "owner/private-backups", "STUDIO_BACKUP_TOKEN": "synthetic-token",
+                                    "STUDIO_BACKUP_PASSPHRASE": PHRASE, "STUDIO_RESTORE_CONFIRMATION": ""}), \
+                patch.object(sys, "argv", ["manage", "restore"]), patch.object(manage, "connection") as ssh, patch.object(manage, "summary"):
+            self.assertEqual(manage.main(), 1)
+            ssh.assert_not_called()
+
+    def test_maintenance_ssh_requires_pinned_identity_and_has_no_global_changes(self):
+        with patch.dict(os.environ, {"STUDIO_SSH_KNOWN_HOSTS": ""}), patch.object(manage, "SSH") as ssh:
+            with self.assertRaisesRegex(manage.DeployError, "STUDIO_SSH_KNOWN_HOSTS_MISSING"):
+                with manage.connection("192.0.2.1", "synthetic-password", strict=True): pass
+            ssh.assert_not_called()
+            with manage.connection("192.0.2.1", "synthetic-password", strict=False): pass
+            self.assertIsNone(ssh.call_args.kwargs["known_hosts"])
+        with patch.dict(os.environ, {"STUDIO_SSH_KNOWN_HOSTS": "192.0.2.1 ssh-ed25519 synthetic-public-key"}), patch.object(manage, "SSH") as ssh:
+            with manage.connection("192.0.2.1", "synthetic-password", strict=True):
+                known = ssh.call_args.kwargs["known_hosts"]
+                self.assertEqual(known.stat().st_mode & 0o777, 0o600)
+            self.assertFalse(known.exists())
+
     def test_real_encryption_restore_photos_settings_and_sqlite(self):
         with tempfile.TemporaryDirectory() as folder:
             folder = Path(folder)
@@ -164,7 +225,7 @@ class BackupTests(unittest.TestCase):
             with self.assertRaises(backup.BackupError):
                 backup.publish(store, cipher, manifest, "daily")
             self.assertIn(receipt["tag"], [r["tag_name"] for r in store.items])
-            self.assertFalse(store.deleted)
+            self.assertNotIn(receipt["tag"], store.deleted)
 
     def test_readback_failure_is_not_success_or_update_permission(self):
         store = FakeStore(); store.fail_download = True

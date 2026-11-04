@@ -1,71 +1,81 @@
-# Приёмка 2.5.2 — универсальный GitHub installer
+# Приёмка 2.5.2 — установщик, резервирование и восстановление
 
-Дата: 21.10.2026. Основа: `main` после PR №11, `c7a8a453c3aab3914eee8296e4cdd46ff2a81e33`. Рабочая ветка: `feat/universal-github-installer-v2.5.2`. PR готовится отдельно, merge и реальное VPS-развёртывание не выполняются.
+Дата: 04.11.2026. Основа `main`: `c7a8a453c3aab3914eee8296e4cdd46ff2a81e33` (PR №11). Ветка: `feat/universal-github-installer-v2.5.2`. [PR №12](https://github.com/jurist77/loft-booking/pull/12). **Merge, реальные SSH-подключения, VPS и рабочий backup repo не использовались.**
 
-**Серверы владельца не использовались.** Реальные systemd/SSH/SQLite проверки выполняются исключительно в одноразовых GitHub Ubuntu 24.04 runners x64 и ARM64. Это не доказательство достаточных ресурсов, доступности SSH, отсутствия влияния на реальный VPN или готовности HTTPS на будущем VPS.
+Последнее ТЗ разрешает временный публичный HTTP с вымышленными контактами и добавляет encrypted Releases/restore. Оно заменяет первоначальное loopback-only ограничение 2.5.2. HTTPS и сеть VPS не настраиваются. Старые успешные CI предыдущей редакции не считаются проверкой новой функциональности.
 
-## Состав
+## Матрица требований
 
-| Файл | Назначение |
+| Требование | Реализация / проверка | Граница подтверждения |
+| --- | --- | --- |
+| Только IP при Install | workflow_dispatch/server_ip, IPv4/IPv6; root:22/password Secret; gate exact main SHA | Contract tests; реальные SSH запрещены |
+| Universal native package | Ubuntu 24.04 x64/ARM64, Node 24.12.0/ABI137, manifest/SHA/ldd/native sandbox | Две реальные архитектуры предусмотрены CI; текущий новый run ещё не подтверждён |
+| Нет сборки на VPS | Allowlisted self-contained rootfs; Node/shared libs включены; runtime host не заменяется | Package parser/audit unit; полная native сборка требует Ubuntu CI |
+| Не переносить секреты/данные | Source ignore + аудит финального rootfs: обязательные файлы, отсутствие .env/key/SQLite по имени и magic; builder не получает Secrets | Synthetic fixtures; смысловое распознавание всех возможных секретов не обещается |
+| Первая установка / no-op / update | Managed user/пути, atomic state, systemd, отсутствие перезапуска исправного same SHA; update через offsite barrier | Unit + код настоящего systemd harness для CI |
+| SQLite/photos/settings постоянные | DATA вне кода; новые релизы не заменяют файлы; photos initial seed, settings storage foundation | Real filesystem/SQLite unit; full systemd update/restore harness |
+| Public HTTP, порт сохраняется | Свободный 3000 или 3100–3199, wildcard listener; exact IP Origin, явный тестовый флаг | Порт/Origin unit; CI local HTTP; реальный внешний маршрут не проверялся |
+| Внутренний / внешний статус отдельно | Health/API/acceptance обязательны, отдельный external probe reachable/unreachable | Mock HTTP boundary + реальные локальные HTTP app tests |
+| Encrypted offsite backup | Реальный SQLite Backup API, tar/checksums, GPG AES256, private Releases + download/readback | Реальные SQLite/GPG; GitHub операции **только FakeStore** |
+| Daily / failure / retention | 03:15 Москва, максимум 2 попытки, FAILED + GitHub notifications; 7 успешных Moscow days / 3 completed preupdate / pending pin | Rotation/failure tests, включая переезд между instance и release+tag API contract |
+| Update без backup запрещён | Nonce/schema/bundle-SHA receipt barrier, pre-migration hold; failure abort только при прежней схеме | Unit: install не вызван при backup failure; local state/service tests |
+| Restore только по подтверждению | list → tag → typed confirmation, trusted SSH; decrypt/hash/точная migration map/schema check | Real archive/FS/SQLite tests; внешние операции mock |
+| Preserve current / rollback | Original whole DATA/WAL/photos/settings сохраняется рядом; rollback code только совместим со схемой | Restore swap/undo unit + systemd harness success/failure; native CI pending |
+| Изолированная техприёмка | Separate temp SQLite и Next child: health, availability, booking201/conflict409, restart→busy preserved | Настоящие local HTTP/SQLite; production клиентские записи не меняются |
+| VPN/сеть не затронуты | RootDirectory/minimal permissions; только свой unit/user/files; никаких firewall/proxy/DNS/VPN commands | Unit + CI canary/fingerprints; реальные VPN не запускались |
+| Нет реального deploy в PR | Install/backup/restore только main/manual или main schedule после merge; no push deploy | Статическая проверка workflows; старый real_ssh.py сохранён, но больше не вызывается CI |
+| DEMO/SERVER сохранены | Не менялись UI/изображения/SQL/Pages/Backend CI; единственное API-изменение — opt-in HTTP literal IP | Existing unit/integration/HTTP/E2E/builds |
+
+## Файлы
+
+- `.github/workflows/install-studio.yml`: manual install + backup configuration gate + отчёт/cleanup.
+- `.github/workflows/installer-package.yml`, `installer-checks.yml`: native package, unit/security, real systemd harness на disposable CI; без реальных SSH и backup repo.
+- `.github/workflows/backup-studio.yml`: daily/manual encrypted backup; `.github/workflows/restore-studio.yml`: list/confirmed restore.
+- `scripts/installer/package.py`: allowlist, native runtime/libs, final package audit и manifest; `deploy.py`: SSH/framing и безопасная передача snapshot/receipt.
+- `scripts/installer/remote.py`, `maintenance.py`: host compatibility, managed filesystem/systemd, consistency barriers, photos/settings, whole-directory restore/rollback.
+- `scripts/installer/backup.py`, `manage.py`: GPG, dedicated-token Releases, bounded retries/rotation, runner coordination.
+- `scripts/installer/schema.mjs`, `acceptance.mjs`, `verify-main.py`, `verify-version.py`: fingerprint, isolated technical acceptance, exact-SHA CI gates.
+- `tests/installer/`: unit/mock external tests и настоящий CI-only systemd harness. Исторический real_ssh.py сохранён, не вызывается.
+- `src/server/api-security.ts`, `api.test.ts`: opt-in non-loopback HTTP только server + literal IP. HTTPS default/CORS/rate limits/booking rules сохранены.
+- `README.md`, [полная инструкция](../../universal-installer.md), этот отчёт.
+
+## Выполненные локальные проверки
+
+Cloud: Node 24.19.0, SQLite 3.53.4, Python 3.12.14, GPG, Chromium; среда не Ubuntu 24.04 с полноценным root/systemd. Нельзя подменять эту среду настоящим VPS.
+
+| Проверка | Результат |
 | --- | --- |
-| `.github/workflows/install-studio.yml` | `Install Studio 19.25`, только workflow_dispatch, единственный input server_ip, парольный Secret только install job, root:22, итог Summary |
-| `.github/workflows/installer-package.yml` | Переиспользуемая native-сборка и испытания на двух Ubuntu 24.04 архитектурах; публикация только проверенных artifacts |
-| `.github/workflows/installer-checks.yml` | Автоматические проверки установщика на PR/main, без SSH к VPS и без SSH Secrets |
-| `scripts/installer/package.py` | Allowlisted self-contained rootfs: Node, shared libraries, Next SERVER, SQL/CLI, manifest и SHA256 |
-| `scripts/installer/remote.py` | Совместимость, lock, managed identity/права, первая установка/update/backup/migrate/systemd/health и безопасный rollback |
-| `scripts/installer/deploy.py` | Password SSH через env, IPv4/IPv6, ограниченное исключение host-key check, private upload framing, безопасные коды/summary |
-| `scripts/installer/verify-main.py` | Точный main SHA и последние успешные Backend/Audit/Installer push-checks, проверка input/наличия Secret до SSH |
-| `scripts/installer/schema.mjs` | Только fingerprint схемы и журнала миграций; не клиентских строк |
-| `tests/installer/test_installer.py` | Security/contract unit tests: input, gate, ошибки SSH, secret-free output, tar/links/ABI, ports, lock, private unit |
-| `tests/installer/real_systemd.py` | Настоящий production receiver/installer, systemd rootfs, HTTP/SQLite, repeat/update/failures/rollback/data и инварианты CI host |
-| `tests/installer/real_ssh.py` | Настоящий SSH на loopback с синтетическим test account/password: success/auth failure/connection failure/безопасный вывод |
-| `docs/universal-installer.md` | Настройка Secret, Run workflow, архитектура/права, доступ через SSH, ограничения, риск MITM и recovery |
-| `README.md`, этот отчёт | Навигация и результаты |
+| Installer unit/security/backup/restore | 37 passed; реальная криптография и SQLite, внешние действия mock |
+| `npm test` | 152 passed |
+| `npm run test:integration` | 57 passed, настоящая SQLite |
+| `npm run typecheck`, `npm run lint` | Passed |
+| `npm run build:server` | Passed |
+| `npm run test:server:http` | 3 цикла 200→503→200, тот же Next process; readonly503→recovery200 |
+| `npm run test:api:http` | 18 групп passed, real HTTP/SQLite |
+| `npm run test:server:http:failure` | Passed: постоянный503 завершил настоящий CLI кодом1, cleanup восстановил тестовую DB |
+| Node DEMO / static DEMO / audit | Passed при повторном полном `test:demo:isolation`: серверные API404, invalid SQLite config ignored, 29 файлов, canary/credentials отсутствуют |
+| SERVER/DEMO E2E (`npm run test:server:ui`) | 20 SERVER + 26 DEMO passed, mobile/desktop, настоящая SQLite и static DEMO |
+| Isolated installer acceptance CLI | Passed: real SQLite/HTTP, booking201/conflict409/restart→persistence; временная БД очищена |
+| YAML / needs / Python syntax / diff | 8 workflows распарсены PyYAML; зависимости jobs валидны, Python compile, diff --check passed. Actionlint отсутствует |
+| Новый GitHub CI | Не подтверждён: api.github.com возвращает Forbidden в текущем runtime; требуемый domain сохранён в cloud draft, но ещё не опубликован |
+| Реальные SSH/VPS/backup Releases | **Не выполнялись**, запрещены ТЗ |
 
-Исходный `src`, Next config, package/lock, миграции 0001/0002, логотип/изображения, прежние unit/integration/E2E, Pages workflow, Backend CI и VPN-аудит не менялись. Новый SERVER deployment не запускается по push. Установщик не добавляет API, бизнес-операции, административную панель или уведомления.
+Один первый локальный `test:demo:isolation` завершился `INVALID_NODE_DEMO` при startup probe; повторный полный запуск прошёл без изменения или ослабления теста. Точная причина первого transient response не установлена, поэтому это не скрывается за заявлением «всё стабильно». Требуется новый CI и последующая отдельная эксплуатационная приёмка.
 
-## Автоматические сценарии
+При подготовке исправлены: chronological rotation после смены instance; cleanup собственного неподтверждённого draft; nonce/schema-safe release snapshot hold при transfer failure; завершение ephemeral GPG agent; проверка полноты и SQLite magic в пакете; fsync staged restore до rename. Все исходные прикладные тесты сохранены.
 
-| Требование | Проверка |
-| --- | --- |
-| Первая установка | Реальный root installer на Ubuntu 24.04 CI без предшествующей Studio; init/migrate/check, service active/enabled, health 200 |
-| Повтор | Тот же source SHA → already-current; ранее созданная вымышленная бронь остаётся в SQLite/GET |
-| Обновление | Новый test release, тот же DB, сохранён previous release, online и pre-migration snapshots |
-| Ошибка SSH | Настоящий локальный sshd остановлен → SSH_CONNECTION_FAILED, без raw stderr |
-| Неверный пароль | Настоящий sshd + synthetic password → SSH_AUTH_FAILED; Secret владельца не нужен и не используется |
-| Занятый порт | На 3000 удерживается отдельный CI listener; приложение получает свободный loopback-порт, прежний socket остаётся |
-| Неверная архитектура | Настоящий tar/manifest parser отклоняет wrong-arch до распаковки; correct native пакеты отдельно испытываются на x64 и ARM64 |
-| Ошибка миграции | В отдельном тестовом архиве SQL 0003 с синтаксической ошибкой; транзакция откатывается, прежний service/бронь проверяются |
-| Ошибка старта | В fault archive отсутствует BUILD_ID; SUCCESS запрещён, первая неудачная установка не оставляет работающий service |
-| Откат | Неизменная schema/history → старый migration check и health; после committed тестовой миграции rollback блокируется, DB сохраняется и сайт остановлен |
-| Секреты | Пароль не в argv/files/upload/artifact; unit adversarial stdout/error и настоящий SSH malformed stdout не публикуют raw значения |
-| Другие службы/VPN | Инертная CI service-canary: PID и файл неизменны; fingerprints прочих unit/config, DNS, routing и firewall проверяются; host canary 0644 недоступен внутри jail |
+## Что остаётся проверить
 
-В сравнении `iptables-save` исключаются только заголовки времени и числовые packet/byte counters цепочек, у route — уменьшающийся lifetime. **Сами правила, default policies, пути/адреса маршрутов и конфиги не исключаются.** Реальная 3X-UI/Xray/VPN Manager и реальный VPN-трафик не запускались; canary не является VPN-сервисом.
+1. Новый полный native CI x64/ARM64 с **текущим SHA**: package/RootDirectory/systemd/restore/faults. Старые зелёные runs другой редакции не заменяют это подтверждение.
+2. Только после отдельного разрешения: audit фактического VPS, реальные root:22 и known_hosts, память/диск/namespace, public route/IPv6, boot/reboot, VPN peaks и отсутствие влияния на VPN.
+3. Только после отдельного разрешения: реально private repo/token с ContentsRW, upload/download/delete Releases+tags, quota/error handling и end-to-end restore на другой VPS. Токен/парольная фраза не запрашиваются в чате.
+4. Для реальных контактов нужны HTTPS и согласованное правовое основание. До этого исключительно вымышленные данные.
+5. Schedule GitHub может задерживаться/отключаться, email зависит от настроек владельца. Локальные releases/recovery/checkpoints требуют будущей политики очистки; они не удаляются автоматически ради места. Rollback после несовместимой committed migration не обещается.
 
-Production receiver тестируется с тем же framed code/archive stream, что применяется после SSH; реальный SSH канал проверяется отдельно на CI loopback. Полного вызова `Install Studio 19.25` с root-паролем настоящего VPS не было. Фальшивые fault archives и БД не публикуются; SHA исходного production package после тестов проверяется на неизменность.
+## Действия владельца и root-операции
 
-## Результаты
+[Runbook](../../universal-installer.md) содержит точные шаги private repo, Secrets, Variables, Run workflow, restore и коды отказов. Необходимы Secrets `STUDIO_SSH_PASSWORD`, `STUDIO_BACKUP_TOKEN`, `STUDIO_BACKUP_PASSPHRASE`, `STUDIO_SSH_KNOWN_HOSTS`; Variables `STUDIO_BACKUP_REPOSITORY`, `STUDIO_BACKUP_SERVER_IP`. Install ввод — только IP; restore требует tag/confirmation.
 
-Локальная cloud-среда — Debian 13 без работающего systemd PID1 и без root. Поэтому здесь не имитируется Ubuntu/VPS установка: только Python security unit tests, YAML/синтаксис и доступные existing checks. Root/systemd/архитектурные результаты берутся из GitHub CI, не из моков.
+Root создаёт только managed user/dirs/unit, извлекает проверенный код, запускает собственные sandbox DB/acceptance CLI, останавливает/запускает только Studio и переключает её DATA при подтверждённом restore. Он не редактирует VPN/sshd/firewall/proxy/DNS, не ставит пакеты на VPS. Next работает непривилегированно. Host-key exception Install несёт MITM/root-password риск; backup/restore — strict pinning.
 
-- Unit установщика: **18 passed** в cloud; дополнительно выполняются на обеих CI архитектурах. Включены отказ от перезаписи изменённого SERVER environment и корректный итог workflow при ошибке очистки transient artifacts.
-- Настоящие install/update/failure/rollback на Ubuntu 24.04 **x64 и ARM64** прошли в CI, включая stopped first failure/retry, сохранность брони и правила безопасности. Проверки private HTTP assets включены в финальный прогон.
-- Настоящий SSH CI: успешный вход, неверный пароль, недоступный listener и безопасные ошибки проверены на обеих архитектурах. IPv6 loopback проверяется при наличии kernel support и отдельно отмечается в CI notice; публичная IPv6-маршрутизация/реальный VPS не проверялись.
-- В ходе испытаний исправлена классификация отказа авторизации: при NumberOfPasswordPrompts=1 OpenSSH может вернуть 255 вместо sshpass 5. Фиксированные C-locale маркеры stderr разбираются только в памяти, raw stderr не публикуется; число попыток не увеличено. Добавлен regression unit test.
-- Старые проверки приложения: **151 unit, 57 SQLite integration, 18 групп API HTTP, health 3×200→503→200/readonly/negative control, 20 SERVER + 26 DEMO E2E**, TypeScript/lint, SERVER/Node DEMO/static DEMO builds и audit 29 экспортированных файлов успешны в Backend CI.
-- YAML (inputs/triggers/needs/permissions), ссылки документации, diff и неизменность app/Pages/SQL проверены; секреты/реальные контакты/БД и отчёты VPS не включены. Actionlint локально отсутствует; синтаксис новых CI workflows дополнительно проверен самим GitHub при реальных запусках.
-
-Ссылки на **финальные полные CI runs и точный SHA** приводятся в PR и итоговом сообщении после завершения. PR переводится из draft только после success всех jobs, включая обе архитектуры; успешные отдельные шаги не объявляются успешным deployment. На этом этапе workflow `Install Studio 19.25` на реальном VPS не запускался.
-
-## Оставшиеся ограничения
-
-- Реальный VPS не установлен/не протестирован; нагрузка VPN и минимальные ресурсы конкретной машины неизвестны. CI успех не заменяет [аудит VPS](../../vps-audit-runbook.md).
-- Host key verification отключена только install workflow по решению владельца. MITM может получить root-пароль; checksums этого не устраняют. Обычные SSH/audit-настройки не изменены.
-- Только Ubuntu 24.04/systemd/Python 3.12/root:22/x64 или arm64 с поддержкой namespace sandbox; пакеты ОС на VPS не устанавливаются. Ограниченные контейнерные VPS могут не подойти.
-- Сайт только 127.0.0.1. Публичный HTTPS, телефонный доступ, домен и reverse proxy не настроены. Для Mac предусмотрен проверяемый SSH loopback tunnel, с точным Origin.
-- Backups перед обновлением локальные, не offsite. Шифрованный внешний backup/retention/alerts, полный log/disk maintenance и reboot/recovery rehearsal остаются отдельной эксплуатационной работой. Старые/failed releases и snapshots не удаляются автоматически.
-- При committed новой миграции или hard interruption не обещается автоматический старый код/restore: сохраняются данные, требуется проверка совместимости. Ничего не стирать для обхода blocked state.
-- Реальные персональные данные не использовались; правовые основания публичного сбора контактов не решены этим этапом.
-
-[Инструкция для владельца и технический runbook](../../universal-installer.md). Остановиться для приёмки PR, не запускать на VPS и не выполнять merge автоматически.
+Остановиться для приёмки PR; merge и запуск реальных workflows не выполнять автоматически.

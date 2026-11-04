@@ -35,6 +35,24 @@ VERSION = "a" * 40
 
 
 class InstallerTests(unittest.TestCase):
+    def test_final_package_audit_rejects_missing_files_secrets_and_disguised_database(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            with self.assertRaisesRegex(RuntimeError, "PACKAGE_INCOMPLETE"):
+                packager.audit_root(root)
+            required = ("usr/bin/node", "app/.next-server/BUILD_ID", "app/package.json", "app/next.config.ts",
+                        "app/node_modules/next/dist/bin/next", "app/scripts/database.mjs",
+                        "app/scripts/installer/acceptance.mjs", "app/scripts/installer/schema.mjs", "app/migrations/sqlite/0001_fixture.sql")
+            for name in required:
+                path = root / name; path.parent.mkdir(parents=True, exist_ok=True); path.write_text("synthetic fixture")
+            packager.audit_root(root)
+            for name, value in (("app/.env.local", b"synthetic, not an actual secret"),
+                                ("app/settings.dat", b"SQLite format 3\x00" + b"synthetic data")):
+                path = root / name; path.write_bytes(value)
+                with self.assertRaisesRegex(RuntimeError, "PACKAGE_(PRIVATE_FILE|SQLITE_DATA)_FORBIDDEN"):
+                    packager.audit_root(root)
+                path.unlink()
+
     def test_workflow_summary_does_not_report_success_after_cleanup_failure(self):
         import os
         workflow = (SCRIPTS.parents[1] / ".github/workflows/install-studio.yml").read_text()

@@ -161,6 +161,13 @@ class Maintenance:
                 os.chmod(path, 0o700 if path.is_dir() else 0o600)
             o.helper(release, ["scripts/database.mjs", "check"], "RESTORE_DATABASE_INVALID", data_dir=stage)
             o.require(o.schema(release, data_dir=stage) == manifest["schema"], "RESTORE_SCHEMA_MISMATCH")
+            # Make the staged contents durable before publishing the directory.
+            for path in sorted(stage.rglob("*"), key=lambda p: len(p.parts), reverse=True) + [stage]:
+                fd = os.open(path, os.O_RDONLY)
+                try:
+                    os.fsync(fd)
+                finally:
+                    os.close(fd)
             return stage, manifest
         except BaseException:
             shutil.rmtree(stage)

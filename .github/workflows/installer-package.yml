@@ -56,10 +56,6 @@ jobs:
         env:
           STUDIO_SOURCE_SHA: ${{ inputs.source_sha }}
         run: python3 scripts/installer/package.py --version "$STUDIO_SOURCE_SHA" --output "$RUNNER_TEMP/server.tar.gz"
-      - name: Install SSH tools only on the disposable CI runner
-        run: |
-          sudo apt-get update -qq
-          sudo apt-get install -y --no-install-recommends sshpass openssh-server
       # No real SSH connections in this PR: transport failures are mocked in
       # test_installer.py; the previous real_ssh.py is retained but not invoked.
       - name: Real systemd installation, updates, failures and schema-aware rollback on CI only

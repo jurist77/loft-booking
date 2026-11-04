@@ -114,7 +114,7 @@ def run_install(peer, store, phrase, artifacts, version, bundle=None):
             if meta and meta["instance"] == info["instance"] and meta.get("pending"):
                 complete_update(store, {"tag": release["tag_name"], "cipher_sha256": meta["cipher_sha256"]})
     receipt = None
-    if info["installed"] and (info["version"] != version or bundle):
+    if info["installed"] and (info["version"] != version or bundle or not info.get("healthy", True)):
         try:
             receipt = make_backup(peer, store, phrase, "restore" if bundle else "update", hold=True)
         except (BackupError, DeployError):
@@ -127,7 +127,14 @@ def run_install(peer, store, phrase, artifacts, version, bundle=None):
     try:
         result = peer.install(archive, version, receipt, bundle)
     except BaseException:
-        # Release remains pending/protected until an explicit successful recovery.
+        # Preflight/transfer failure may leave only the snapshot hold. The host
+        # resumes only if nonce AND schema still match; committed migration or
+        # unknown state refuses this request and keeps its protected checkpoint.
+        if receipt and receipt.get("nonce"):
+            try:
+                peer.abort(receipt["nonce"])
+            except Exception:
+                pass
         raise
     if receipt and receipt.get("verified"):
         complete_update(store, receipt)

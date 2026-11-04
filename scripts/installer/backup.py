@@ -42,10 +42,11 @@ def validate_bundle(path, destination=None):
                 raise BackupError("UNSAFE_BACKUP_BUNDLE")
             names.add(member.name)
             total += member.size
-        if total > MAX_ASSET or not {"manifest.json", "studio.sqlite"} <= names:
+        if total > MAX_ASSET or not {"manifest.json", "studio.sqlite", "photos", "settings"} <= names:
             raise BackupError("BUNDLE_LIMIT")
         meta = archive.getmember("manifest.json")
-        if meta.size > 4 * 1024**2:
+        if (not meta.isfile() or not archive.getmember("studio.sqlite").isfile() or
+                not archive.getmember("photos").isdir() or not archive.getmember("settings").isdir() or meta.size > 4 * 1024**2):
             raise BackupError("BUNDLE_METADATA_INVALID")
         manifest = json.load(archive.extractfile(meta))
         if (manifest.get("format") != 2 or manifest.get("studio") != "studio1925" or
@@ -78,8 +79,13 @@ def crypt(source, destination, passphrase, decrypt=False):
             args = ["gpg", "--batch", "--yes", "--no-tty", "--pinentry-mode", "loopback", "--no-symkey-cache",
                     "--passphrase-fd", str(read_fd), "--output", str(destination)]
             args += ["--decrypt", str(source)] if decrypt else ["--cipher-algo", "AES256", "--s2k-digest-algo", "SHA512", "--s2k-count", "65011712", "--symmetric", str(source)]
-            result = subprocess.run(args, pass_fds=(read_fd,), stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
-                                    env={"PATH": os.environ.get("PATH", "/usr/bin:/bin"), "GNUPGHOME": home, "LC_ALL": "C"}, timeout=300)
+            try:
+                result = subprocess.run(args, pass_fds=(read_fd,), stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                                        env={"PATH": os.environ.get("PATH", "/usr/bin:/bin"), "GNUPGHOME": home, "LC_ALL": "C"}, timeout=300)
+            finally:
+                # Kill only the agent belonging to our unique ephemeral home.
+                subprocess.run(["gpgconf", "--homedir", home, "--kill", "gpg-agent"], stdout=subprocess.DEVNULL,
+                               stderr=subprocess.DEVNULL, timeout=15, check=False)
             if result.returncode:
                 destination.unlink(missing_ok=True)
                 raise BackupError("DECRYPTION_FAILED" if decrypt else "ENCRYPTION_FAILED")
@@ -185,8 +191,8 @@ def rotate(store, instance):
     for kind, keep in (("daily", 7), ("preupdate", 3)):
         # One studio, one global retention policy, even after moving to a new VPS.
         eligible = [(r, m) for r, m in entries if m and m["kind"] == kind and not m.get("pending")]
-        eligible.sort(key=lambda pair: pair[0]["tag_name"], reverse=True)
-        # Keep newest distinct daily UTC dates (daily workflow is 03:15 Moscow).
+        eligible.sort(key=lambda pair: (TAG.fullmatch(pair[0]["tag_name"])[3], TAG.fullmatch(pair[0]["tag_name"])[4]), reverse=True)
+        # Keep newest distinct Moscow dates, including after moving to a new VPS.
         if kind == "daily":
             dates = []
             remove = []
@@ -240,6 +246,14 @@ def publish(store, cipher, manifest, kind, retries=2):
             return {"tag": tag, "cipher_sha256": cipher_hash, "nonce": manifest["nonce"], "verified": True}
         except BackupError:
             if attempt + 1 == retries:
+                # An unverified draft is never a retained backup. Keep published
+                # verified copies even if later retention/acknowledgement fails.
+                try:
+                    for failed in store.releases():
+                        if failed["tag_name"] == tag and failed.get("draft") and not (managed(failed, drafts=True) or {}).get("verified"):
+                            store.delete(failed)
+                except BackupError:
+                    pass
                 raise
             time.sleep(2)
 

@@ -42,7 +42,7 @@ def command(args, check=True):
     return result
 
 
-def apply(archive, version, expected_success=True):
+def apply(archive, version, expected_success=True, restore_bundle=None):
     checksum = installer.digest(archive)
     receipt = None
     if (installer.CONFIG / "state.json").exists():
@@ -52,11 +52,11 @@ def apply(archive, version, expected_success=True):
                 meta = lifecycle_backup.managed(r)
                 if meta and meta.get("pending") and meta["instance"] == current.get("instance"):
                     lifecycle_backup.complete_update(STORE, {"tag": r["tag_name"], "cipher_sha256": meta["cipher_sha256"]})
-        if current.get("current") and current.get("version") != version:
+        if current.get("current") and (current.get("version") != version or restore_bundle):
             with tempfile.TemporaryDirectory(prefix="ci-offsite-") as folder:
                 plain = Path(folder) / "snapshot.tar.gz"
                 with plain.open("wb") as output:
-                    snap = subprocess.run(["python3", "-", "--action", "snapshot", "--purpose", "update", "--hold"],
+                    snap = subprocess.run(["python3", "-", "--action", "snapshot", "--purpose", "restore" if restore_bundle else "update", "--hold"],
                                           input=transport.remote_source(), stdout=output, stderr=subprocess.DEVNULL, timeout=180)
                 assert snap.returncode == 0, "CI consistent snapshot failed"
                 manifest = lifecycle_backup.validate_bundle(plain)
@@ -64,7 +64,8 @@ def apply(archive, version, expected_success=True):
                 lifecycle_backup.crypt(plain, cipher, PHRASE)
                 receipt = lifecycle_backup.publish(STORE, cipher, manifest, "preupdate")
                 receipt["bundle_sha256"] = lifecycle_backup.file_hash(plain)
-    with transport.upload_payload(archive, version, checksum, origin_host="127.0.0.1", receipt=receipt) as payload:
+    with transport.upload_payload(archive, version, checksum, origin_host="127.0.0.1", receipt=receipt,
+                                  bundle=restore_bundle, confirmed=bool(restore_bundle)) as payload:
         result = subprocess.run(["python3", "-c", transport.BOOTSTRAP], stdin=payload, capture_output=True, text=True, timeout=1500)
     assert result.returncode == (0 if expected_success else 1), "Unexpected installer outcome: " + result.stdout[:200]
     value = json.loads(result.stdout)
@@ -230,6 +231,38 @@ def main():
             assert apply(upgraded, "b" * 40)["operation"] == "update"
             assert state()["port"] == first["port"], "Update changed the assigned port"
             assert state()["previous"] is not None
+            assert_booking(assert_booking_date)
+            check_isolation()
+            # Full receiver restore: real SQLite/GPG/systemd; only GitHub storage
+            # is mocked. No SSH connection and no remote backup repository.
+            snapshot = directory / "restore.tar.gz"
+            photo = installer.DATA / "photos/ci-photo.jpg"
+            settings = installer.DATA / "settings/studio.json"
+            photo.write_bytes(b"synthetic original photo")
+            settings.write_text('{"fixture":"original"}')
+            for path in (photo, settings):
+                os.chown(path, state()["uid"], state()["gid"]); os.chmod(path, 0o600)
+            with snapshot.open("wb") as output:
+                saved = subprocess.run(["python3", "-", "--action", "snapshot", "--purpose", "daily"],
+                                       input=transport.remote_source(), stdout=output, stderr=subprocess.DEVNULL, timeout=180)
+            assert saved.returncode == 0
+            metadata = lifecycle_backup.validate_bundle(snapshot)
+            cipher = directory / "snapshot.tar.gz.gpg"
+            lifecycle_backup.crypt(snapshot, cipher, PHRASE)
+            saved_receipt = lifecycle_backup.publish(STORE, cipher, metadata, "daily")
+            retrieved = directory / "retrieved.tar.gz"
+            lifecycle_backup.retrieve(STORE, saved_receipt["tag"], retrieved, PHRASE)
+            photo.write_bytes(b"synthetic newer photo"); settings.write_text('{"fixture":"newer"}')
+            bad_restore = variant(args.archive, directory, "f" * 40, "bad-start")
+            result = apply(bad_restore, "f" * 40, False, restore_bundle=retrieved)
+            assert result["code"].endswith("rollback=restored-and-health-verified")
+            assert photo.read_bytes() == b"synthetic newer photo"
+            assert json.loads(settings.read_text())["fixture"] == "newer"
+            upgraded = variant(args.archive, directory, "b" * 40)
+            assert apply(upgraded, "b" * 40, restore_bundle=retrieved)["operation"] == "restore"
+            assert photo.read_bytes() == b"synthetic original photo"
+            assert json.loads(settings.read_text())["fixture"] == "original"
+            assert list(installer.DATA.parent.glob("studio1925-recovery-*")), "Original data not preserved"
             assert_booking(assert_booking_date)
             check_isolation()
             failed = variant(args.archive, directory, "c" * 40, "bad-migration")

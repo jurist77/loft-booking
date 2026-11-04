@@ -20,3 +20,5 @@ next-env.d.ts
 *.db
 *.db-*
 *.partial
+__pycache__/
+*.py[cod]
