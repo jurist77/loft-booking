@@ -35,6 +35,28 @@ VERSION = "a" * 40
 
 
 class InstallerTests(unittest.TestCase):
+    def test_ci_receiver_frames_restore_code_archive_and_snapshot_without_external_calls(self):
+        spec = importlib.util.spec_from_file_location("ci_fixture", Path(__file__).with_name("real_systemd.py"))
+        ci = importlib.util.module_from_spec(spec); spec.loader.exec_module(ci)
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory); archive = root / "server.tar.gz"; restore = root / "restore.tar.gz"
+            archive.write_bytes(b"synthetic production artifact"); restore.write_bytes(b"synthetic encrypted-then-validated snapshot")
+            def receiver(args, **kwargs):
+                self.assertEqual(args[:2], ["python3", "-c"])
+                stream = kwargs["stdin"]; header = json.loads(stream.readline())
+                code = stream.read(header["code_size"])
+                compile(code, "bundled-remote", "exec")
+                self.assertEqual(stream.read(header["archive_size"]), archive.read_bytes())
+                self.assertEqual(stream.read(header["bundle_size"]), restore.read_bytes())
+                self.assertEqual(header["bundle_sha256"], hashlib.sha256(restore.read_bytes()).hexdigest())
+                self.assertTrue(header["confirmed"])
+                self.assertEqual(stream.read(), b"")
+                self.assertNotIn(SECRET.encode(), code)
+                return SimpleNamespace(returncode=0, stdout='{"status":"SUCCESS"}')
+            with patch.object(ci.installer, "CONFIG", root / "absent-config"), patch.object(ci.subprocess, "run", side_effect=receiver) as external:
+                self.assertEqual(ci.apply(archive, VERSION, restore_bundle=restore)["status"], "SUCCESS")
+                self.assertEqual(external.call_count, 1)
+
     def test_ipv4_only_kernel_is_not_mistaken_for_all_ports_occupied(self):
         actual = socket.socket
         def ipv4_only(family=socket.AF_INET, *args, **kwargs):

@@ -19,6 +19,7 @@ import tempfile
 import time
 import urllib.request
 import sys
+import traceback
 
 REPO = Path(__file__).resolve().parents[2]
 spec = importlib.util.spec_from_file_location("installer", REPO / "scripts/installer/remote.py")
@@ -65,7 +66,7 @@ def apply(archive, version, expected_success=True, restore_bundle=None):
                 receipt = lifecycle_backup.publish(STORE, cipher, manifest, "preupdate")
                 receipt["bundle_sha256"] = lifecycle_backup.file_hash(plain)
     with transport.upload_payload(archive, version, checksum, origin_host="127.0.0.1", receipt=receipt,
-                                  bundle=restore_bundle, confirmed=bool(restore_bundle)) as payload:
+                                  restore_bundle=restore_bundle, confirmed=bool(restore_bundle)) as payload:
         result = subprocess.run(["python3", "-c", transport.BOOTSTRAP], stdin=payload, capture_output=True, text=True, timeout=1500)
     assert result.returncode == (0 if expected_success else 1), "Unexpected installer outcome: " + result.stdout[:200]
     value = json.loads(result.stdout)
@@ -304,6 +305,8 @@ if __name__ == "__main__":
         main()
     except Exception as error:
         detail = str(error)[:700] if isinstance(error, (AssertionError, installer.InstallError)) else type(error).__name__
+        frame = traceback.extract_tb(error.__traceback__)[-1]
+        detail += f"; at {Path(frame.filename).name}:{frame.lineno}:{frame.name}"
         detail = detail.replace("%", "%25").replace("\r", "%0D").replace("\n", "%0A")
         print("::error title=Installer CI::" + detail)
         raise

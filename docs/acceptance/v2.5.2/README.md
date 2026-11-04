@@ -45,7 +45,7 @@ Cloud: Node 24.19.0, SQLite 3.53.4, Python 3.12.14, GPG, Chromium; среда н
 
 | Проверка | Результат |
 | --- | --- |
-| Installer unit/security/backup/restore | 39 passed; реальная криптография и SQLite, внешние действия mock |
+| Installer unit/security/backup/restore | 40 passed; реальная криптография и SQLite, внешние действия mock |
 | `npm test` | 152 passed |
 | `npm run test:integration` | 57 passed, настоящая SQLite |
 | `npm run typecheck`, `npm run lint` | Passed |
@@ -61,6 +61,8 @@ Cloud: Node 24.19.0, SQLite 3.53.4, Python 3.12.14, GPG, Chromium; среда н
 | Реальные SSH/VPS/backup Releases | **Не выполнялись**, запрещены ТЗ |
 
 Один первый локальный `test:demo:isolation` завершился `INVALID_NODE_DEMO` при startup probe; повторный полный запуск прошёл без изменения или ослабления теста. Точная причина первого transient response не установлена, поэтому это не скрывается за заявлением «всё стабильно». Требуется новый CI и последующая отдельная эксплуатационная приёмка.
+
+Native CI run `41905497186` выявил `TypeError` в новом тестовом receiver adapter: keyword `bundle` вместо `restore_bundle` при framing. Исправлено; локальный regression вызывает тот же adapter с настоящим framed stream и mock внешнего запуска, проверяет архив/code/snapshot/hash/confirmation. Это ошибка тестового вызова, не основание отключать реальные systemd сценарии. Добавлена безопасная location-диагностика исключений CI; требуется успешный повтор текущего SHA.
 
 При подготовке исправлены: chronological rotation после смены instance; cleanup собственного неподтверждённого draft; nonce/schema-safe release snapshot hold при transfer failure; завершение ephemeral GPG agent без наследования Secrets; проверка полноты и SQLite magic в пакете; fsync staged restore до rename; IPv4-only kernel; проверка ключа до SSH. Старый deploy CLI переведён на общий backup barrier/валидатор результата, чтобы не оставлять обход обязательной копии или устаревший loopback-контракт. Все исходные прикладные тесты сохранены.
 
