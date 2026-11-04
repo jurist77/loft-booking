@@ -62,7 +62,8 @@ class InstallerTests(unittest.TestCase):
 
     def test_main_gate_rejects_other_refs_missing_secret_and_failed_newest_check(self):
         env = {"STUDIO_SERVER_IP": "203.0.113.9", "STUDIO_PASSWORD_PRESENT": "true", "GITHUB_SHA": VERSION,
-               "GITHUB_REF": "refs/heads/main", "GITHUB_REPOSITORY": "owner/repo"}
+               "GITHUB_REF": "refs/heads/main", "GITHUB_REPOSITORY": "owner/repo",
+               "STUDIO_BACKUP_PASSWORD_PRESENT": "true", "STUDIO_BACKUP_TOKEN_PRESENT": "true", "STUDIO_BACKUP_REPOSITORY": "owner/private-backups"}
         names = ("Check backend foundation", "Check read-only VPS audit tool", "Check universal installer")
         runs = [{"name": name, "databaseId": i, "status": "completed", "conclusion": "success"} for i, name in enumerate(names)]
         def check(overrides, checks, expected):
@@ -204,11 +205,11 @@ class InstallerTests(unittest.TestCase):
                 pass  # It was already occupied; the same assertion applies.
             self.assertIn(remote.choose_port(), range(3100, 3200))
 
-    def test_service_is_private_root_directory_and_only_studio_paths(self):
+    def test_service_is_sandboxed_public_test_http_and_only_studio_paths(self):
         unit = remote.service_text(Path("/opt/studio1925/releases/example"), 3100)
-        for expected in ("RootDirectory=", "--hostname 127.0.0.1", "User=studio1925", "Restart=on-failure", "ProtectSystem=strict"):
+        for expected in ("RootDirectory=", "--hostname ", "--port 3100", "User=studio1925", "Restart=on-failure", "ProtectSystem=strict", "/photos:/app/public/images"):
             self.assertIn(expected, unit)
-        for forbidden in ("0.0.0.0", "/etc/xray", "/usr/local/x-ui", "PartOf=", "Requires=", "MemoryMax=", "ExecStart=/bin/sh"):
+        for forbidden in ("/etc/xray", "/usr/local/x-ui", "PartOf=", "Requires=", "MemoryMax=", "ExecStart=/bin/sh"):
             self.assertNotIn(forbidden, unit)
         self.assertNotIn("/backups", unit)
         self.assertIn("API_TRUST_PROXY=false", remote.environment_text(3100))

@@ -1,0 +1,118 @@
+name: Restore Studio 19.25
+
+on:
+  workflow_dispatch:
+    inputs:
+      operation:
+        type: choice
+        description: "List backups first; restore requires explicit confirmation"
+        options: [list, restore]
+        default: list
+      server_ip:
+        type: string
+        description: "Target VPS for restore; may differ from original"
+        required: false
+      backup_tag:
+        type: string
+        description: "Exact tag from the list result"
+        required: false
+      app_version:
+        type: string
+        description: "Optional compatible verified main SHA; default current main SHA"
+        required: false
+      confirmation:
+        type: string
+        description: "Type RESTORE STUDIO 19.25 to authorize replacement of current data"
+        required: false
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: studio-install-${{ inputs.server_ip || vars.STUDIO_BACKUP_SERVER_IP }}
+  cancel-in-progress: false
+
+jobs:
+  validate:
+    runs-on: ubuntu-24.04
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - run: test "$GITHUB_REF" = refs/heads/main
+      - name: List only (no SSH, decryption or data changes)
+        if: inputs.operation == 'list'
+        env:
+          STUDIO_BACKUP_REPOSITORY: ${{ vars.STUDIO_BACKUP_REPOSITORY }}
+          STUDIO_BACKUP_TOKEN: ${{ secrets.STUDIO_BACKUP_TOKEN }}
+        run: python3 scripts/installer/manage.py list
+      - name: Verify confirmation and selected immutable main version
+        id: version
+        if: inputs.operation == 'restore'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          STUDIO_SELECTED_VERSION: ${{ inputs.app_version || github.sha }}
+          STUDIO_RESTORE_CONFIRMATION: ${{ inputs.confirmation }}
+        run: python3 scripts/installer/verify-version.py
+      - name: Validate encrypted snapshot before building or contacting the target
+        if: inputs.operation == 'restore'
+        env:
+          STUDIO_RESTORE_CONFIRMATION: ${{ inputs.confirmation }}
+          STUDIO_BACKUP_TAG: ${{ inputs.backup_tag }}
+          STUDIO_BACKUP_REPOSITORY: ${{ vars.STUDIO_BACKUP_REPOSITORY }}
+          STUDIO_BACKUP_TOKEN: ${{ secrets.STUDIO_BACKUP_TOKEN }}
+          STUDIO_BACKUP_PASSPHRASE: ${{ secrets.STUDIO_BACKUP_PASSPHRASE }}
+          STUDIO_SELECTED_VERSION: ${{ inputs.app_version || github.sha }}
+        run: python3 scripts/installer/manage.py inspect --version "$STUDIO_SELECTED_VERSION"
+  packages:
+    if: inputs.operation == 'restore'
+    needs: validate
+    uses: ./.github/workflows/installer-package.yml
+    with:
+      source_sha: ${{ needs.validate.outputs.version }}
+      publish_packages: true
+  restore:
+    needs: [validate, packages]
+    if: inputs.operation == 'restore'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
+        with:
+          pattern: studio-server-*
+          path: ${{ runner.temp }}/studio-packages
+      - run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends sshpass gnupg
+      - name: Explicit restore with strict SSH host identity, preservation and acceptance
+        env:
+          STUDIO_SERVER_IP: ${{ inputs.server_ip }}
+          STUDIO_RESTORE_CONFIRMATION: ${{ inputs.confirmation }}
+          STUDIO_BACKUP_TAG: ${{ inputs.backup_tag }}
+          STUDIO_SSH_PASSWORD: ${{ secrets.STUDIO_SSH_PASSWORD }}
+          STUDIO_SSH_KNOWN_HOSTS: ${{ secrets.STUDIO_SSH_KNOWN_HOSTS }}
+          STUDIO_BACKUP_REPOSITORY: ${{ vars.STUDIO_BACKUP_REPOSITORY }}
+          STUDIO_BACKUP_TOKEN: ${{ secrets.STUDIO_BACKUP_TOKEN }}
+          STUDIO_BACKUP_PASSPHRASE: ${{ secrets.STUDIO_BACKUP_PASSPHRASE }}
+          STUDIO_SELECTED_VERSION: ${{ needs.validate.outputs.version }}
+        run: python3 scripts/installer/manage.py restore --artifacts "$RUNNER_TEMP/studio-packages" --version "$STUDIO_SELECTED_VERSION"
+  cleanup:
+    if: always() && inputs.operation == 'restore'
+    needs: [validate, packages, restore]
+    runs-on: ubuntu-24.04
+    permissions:
+      actions: write
+    steps:
+      - name: Delete only transient build packages (never backup Releases)
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh api "repos/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID/artifacts" --jq '.artifacts[] | select(.name | startswith("studio-server-")) | .id' > "$RUNNER_TEMP/packages"
+          while IFS= read -r id; do gh api --method DELETE "repos/$GITHUB_REPOSITORY/actions/artifacts/$id"; done < "$RUNNER_TEMP/packages"

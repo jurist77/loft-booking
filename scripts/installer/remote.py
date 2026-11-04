@@ -24,6 +24,7 @@ import tarfile
 import tempfile
 import time
 import uuid
+from types import SimpleNamespace
 
 BASE = Path("/opt/studio1925")
 CONFIG = Path("/etc/studio1925")
@@ -137,7 +138,7 @@ def owned_directory(path, uid=0, gid=0, mode=0o700, create=False):
         require(stat.S_IMODE(info.st_mode) == mode, "PRIVATE_DIRECTORY_REQUIRED")
 
 
-def load_state():
+def load_state(allow_pending=False):
     path = CONFIG / "state.json"
     if not path.exists():
         # Never adopt another application's account/files/unit.
@@ -152,11 +153,14 @@ def load_state():
     require(stat.S_ISREG(info.st_mode) and info.st_uid == 0 and info.st_nlink == 1 and stat.S_IMODE(info.st_mode) == 0o600, "UNSAFE_STATE")
     state = json.loads(path.read_text())
     require(state.get("format") == 1 and state.get("managed_by") == "studio-installer", "UNMANAGED_STATE")
-    require(state.get("phase") in ("ready", "failed-first"), "INTERRUPTED_INSTALL_REQUIRES_REVIEW")
+    phases = ("ready", "failed-first", "snapshotting", "backup-pending", "updating") if allow_pending else ("ready", "failed-first")
+    require(state.get("phase") in phases, "INTERRUPTED_INSTALL_REQUIRES_REVIEW")
     if state.get("current"):
         require(isinstance(state.get("port"), int) and (state["port"] == 3000 or 3100 <= state["port"] <= 3199), "UNSAFE_STATE")
         require(re.fullmatch(r"[0-9a-f]{40}-[0-9a-f]{16}-[0-9a-f]{8}", state["current"]), "UNSAFE_STATE")
-        require(UNIT.is_file() and not UNIT.is_symlink() and digest(UNIT) == state.get("unit_sha256"), "UNIT_CHANGED_OUTSIDE_INSTALLER")
+        require(UNIT.is_file() and not UNIT.is_symlink(), "UNIT_CHANGED_OUTSIDE_INSTALLER")
+        if not (allow_pending and state["phase"] == "updating"):
+            require(digest(UNIT) == state.get("unit_sha256"), "UNIT_CHANGED_OUTSIDE_INSTALLER")
     return state
 
 
@@ -209,12 +213,16 @@ def inspect_archive(archive_path, expected_sha, version, arch):
         return manifest
 
 
-def choose_port():
-    for port in (3000, *range(3100, 3200)):
+def choose_port(preferred=None):
+    for port in ((preferred,) if preferred is not None else (3000, *range(3100, 3200))):
         with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as probe:
             try:
                 probe.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-                probe.bind(("127.0.0.1", port))
+                probe.bind(("0.0.0.0", port))
+                if socket.has_ipv6:
+                    with socket.socket(socket.AF_INET6, socket.SOCK_STREAM) as v6:
+                        v6.setsockopt(socket.IPPROTO_IPV6, socket.IPV6_V6ONLY, 1)
+                        v6.bind(("::", port))
                 return port
             except OSError:
                 continue
@@ -236,9 +244,9 @@ Group=studio1925
 RootDirectory={release}/root
 WorkingDirectory=/app
 MountAPIVFS=true
-BindPaths={DATA}:/data {CACHE}:/app/.next-server/cache
+BindPaths={DATA}:/data {CACHE}:/app/.next-server/cache {DATA}/photos:/app/public/images
 EnvironmentFile={CONFIG}/server.env
-ExecStart=/usr/bin/node /app/node_modules/next/dist/bin/next start --hostname 127.0.0.1 --port {port}
+ExecStart=/usr/bin/node /app/node_modules/next/dist/bin/next start --hostname {"::" if socket.has_ipv6 else "0.0.0.0"} --port {port}
 Restart=on-failure
 RestartSec=5
 TimeoutStopSec=30
@@ -267,18 +275,19 @@ WantedBy=multi-user.target
 """
 
 
-def environment_text(port):
+def environment_text(port, origin=None):
+    public = origin or f"http://127.0.0.1:{port}"
     return ("APP_MODE=server\nDEPLOY_TARGET=node\nNODE_ENV=production\nNEXT_TELEMETRY_DISABLED=1\n"
             "SQLITE_PATH=/data/studio.sqlite\nSQLITE_BUSY_TIMEOUT_MS=1000\n"
-            f"API_PUBLIC_ORIGIN=http://127.0.0.1:{port}\nAPI_TRUST_PROXY=false\n")
+            f"API_PUBLIC_ORIGIN={public}\nAPI_TRUST_PROXY=false\nAPI_ALLOW_INSECURE_TEST_HTTP=true\n")
 
 
-def helper(release, arguments, code):
+def helper(release, arguments, code, data_dir=None):
     name = "studio1925-task-" + uuid.uuid4().hex
     command = ["systemd-run", "--quiet", "--wait", "--pipe", "--collect", "--unit=" + name,
                "--property=Type=exec", "--property=User=studio1925", "--property=Group=studio1925",
                "--property=RootDirectory=" + str(release / "root"), "--property=WorkingDirectory=/app",
-               "--property=BindPaths=" + str(DATA) + ":/data " + str(BACKUPS) + ":/backups",
+               "--property=BindPaths=" + str(data_dir or DATA) + ":/data " + str(BACKUPS) + ":/backups",
                "--property=RuntimeMaxSec=120", "--property=UMask=0077", "--property=NoNewPrivileges=true",
                "--property=CapabilityBoundingSet=", "--property=PrivateDevices=true", "--property=PrivateTmp=true",
                "--property=ProtectSystem=strict", "--property=ProtectHome=true", "--property=ProtectProc=invisible",
@@ -291,8 +300,8 @@ def helper(release, arguments, code):
         run(["systemctl", "stop", name + ".service"], check=False, timeout=20)
 
 
-def schema(release):
-    value = helper(release, ["scripts/installer/schema.mjs"], "SCHEMA_CHECK_FAILED")
+def schema(release, data_dir=None):
+    value = helper(release, ["scripts/installer/schema.mjs"], "SCHEMA_CHECK_FAILED", data_dir=data_dir)
     require(re.fullmatch(r"[0-9a-f]{64}", value), "SCHEMA_CHECK_FAILED")
     return value
 
@@ -318,19 +327,43 @@ def health(port, timeout=35):
     raise InstallError("APP_HEALTH_FAILED")
 
 
-def install(archive_path, checksum, version):
+def api_health(port):
+    import datetime
+    date = (datetime.datetime.now(datetime.timezone.utc) + datetime.timedelta(days=2)).strftime("%Y-%m-%d")
+    connection = http.client.HTTPConnection("127.0.0.1", port, timeout=5)
+    try:
+        connection.request("GET", "/api/availability?date=" + date)
+        response = connection.getresponse()
+        value = json.loads(response.read(65536))
+        require(response.status == 200 and value.get("date") == date and value.get("resourceId") == "studio-19-25"
+                and value.get("timezone") == "Europe/Moscow" and isinstance(value.get("busy"), list), "PRODUCTION_API_UNAVAILABLE")
+    finally:
+        connection.close()
+
+
+def maintenance():
+    from maintenance import Maintenance
+    return Maintenance(SimpleNamespace(**globals()))
+
+
+def install(archive_path, checksum, version, origin_host=None, receipt=None, restore_bundle=None, confirmed=False):
     facts = host_facts()
     manifest = inspect_archive(archive_path, checksum, version, facts["arch"])
-    state = load_state()
+    state = load_state(allow_pending=True)
+    held_state = state
+    if state and state.get("phase") in ("snapshotting", "backup-pending"):
+        state = state["pending"]["prior"]
     if state:
         account = managed_account(state)
         for path in (BASE, BASE / "releases"):
             owned_directory(path)
         for path in (DATA, BACKUPS, CACHE):
             owned_directory(path, account.pw_uid, account.pw_gid)
-        if state.get("current"):
-            require(private_environment() == environment_text(state["port"]), "ENVIRONMENT_CHANGED_OUTSIDE_INSTALLER")
-    if state and state.get("current") and state.get("version") == version:
+        if state.get("current") and not (restore_bundle and confirmed):
+            expected = environment_text(state["port"], state.get("origin"))
+            legacy = environment_text(state["port"]).replace("API_ALLOW_INSECURE_TEST_HTTP=true\n", "")
+            require(private_environment() in (expected, legacy), "ENVIRONMENT_CHANGED_OUTSIDE_INSTALLER")
+    if state and state.get("current") and state.get("version") == version and not restore_bundle:
         try:
             health(state["port"], timeout=5)
         except InstallError as error:
@@ -338,9 +371,19 @@ def install(archive_path, checksum, version):
                 raise
             # An unhealthy/stopped instance is redeployed through the backup path.
         else:
+            api_health(state["port"])
+            helper(BASE / "releases" / state["current"], ["scripts/installer/acceptance.mjs"], "TECHNICAL_ACCEPTANCE_FAILED")
             run(["systemctl", "enable", SERVICE], "SERVICE_ENABLE_FAILED")
             return {"status": "SUCCESS", "version": version, "operation": "already-current", "migrations": "unchanged",
-                    "service": "active-enabled", "health": 200, "listener": f"127.0.0.1:{state['port']}"}
+                    "service": "active-enabled", "health": 200, "port": state["port"], "url": state.get("origin", f"http://127.0.0.1:{state['port']}"), "technical_acceptance": "passed"}
+    if state and state.get("current"):
+        if restore_bundle and confirmed and receipt and receipt.get("unavailable") is True:
+            # Explicit restore always preserves the whole original data directory.
+            # A corrupt DB/unavailable offsite write must not be replaced silently.
+            pass
+        else:
+            state = maintenance().check_receipt(held_state, receipt, "restore" if restore_bundle else "update")
+    require(not restore_bundle or confirmed, "RESTORE_CONFIRMATION_REQUIRED")
     # Conservative admission thresholds, not an application peak-memory guarantee.
     memory = re.search(r"^MemAvailable:\s+(\d+)", Path("/proc/meminfo").read_text(), re.M)
     require(memory and int(memory[1]) >= 512 * 1024, "MEMORY_HEADROOM_BELOW_512_MIB")
@@ -354,6 +397,8 @@ def install(archive_path, checksum, version):
     old_unit = UNIT.read_text() if old_release else None
     old_env = private_environment() if old_release else None
     old_schema = None
+    restored_from = None
+    recovery = None
     modified = False
     try:
         if not state:
@@ -361,7 +406,7 @@ def install(archive_path, checksum, version):
             CONFIG.mkdir(mode=0o700)
             account = pwd.getpwnam(USER)
             state = {"format": 1, "managed_by": "studio-installer", "phase": "failed-first", "current": None,
-                     "uid": account.pw_uid, "gid": account.pw_gid}
+                     "uid": account.pw_uid, "gid": account.pw_gid, "instance": uuid.uuid4().hex}
             store_state(state)
         account = managed_account(state)
         for path in (BASE, BASE / "releases"):
@@ -382,34 +427,55 @@ def install(archive_path, checksum, version):
             require(re.fullmatch(r"\d{4}_[a-z0-9_]+\.sql", name) and digest(release / "root/app/migrations/sqlite" / name) == expected, "MIGRATION_CHECKSUM_MISMATCH")
         # Test actual native SQLite in the packaged root before touching the service.
         helper(release, ["-e", "const D=require('better-sqlite3');const d=new D(':memory:');d.prepare('SELECT 1').get();d.close()"], "NATIVE_SQLITE_UNAVAILABLE")
-        if old_release:
+        maintenance().persistent(release, account)
+        if old_release and not restore_bundle:
             helper(old_release, ["scripts/database.mjs", "backup", "--to", "/backups/online-" + uuid.uuid4().hex + ".sqlite"], "BACKUP_FAILED")
             old_schema = schema(old_release)
+        elif old_release:
+            try:
+                old_schema = schema(old_release)
+            except InstallError:
+                old_schema = None
         state["phase"] = "updating"
         store_state(state)
         modified = True
         if old_release:
             run(["systemctl", "disable", SERVICE], "SERVICE_DISABLE_FAILED")
             run(["systemctl", "stop", SERVICE], "SERVICE_STOP_FAILED", timeout=45)
-            require(schema(old_release) == old_schema, "SCHEMA_CHANGED_DURING_UPDATE")
-            helper(old_release, ["scripts/database.mjs", "backup", "--to", "/backups/checkpoint-" + uuid.uuid4().hex + ".sqlite"], "BACKUP_FAILED")
-        else:
+            if not restore_bundle:
+                require(schema(old_release) == old_schema, "SCHEMA_CHANGED_DURING_UPDATE")
+                helper(old_release, ["scripts/database.mjs", "backup", "--to", "/backups/checkpoint-" + uuid.uuid4().hex + ".sqlite"], "BACKUP_FAILED")
+        elif not restore_bundle:
             helper(release, ["scripts/database.mjs", "init"], "DATABASE_INIT_FAILED")
-        helper(release, ["scripts/database.mjs", "migrate"], "MIGRATION_FAILED")
+        if restore_bundle:
+            stage, restored_from = maintenance().stage_restore(restore_bundle, release, account)
+            recovery = maintenance().swap_restore(stage)
+        else:
+            helper(release, ["scripts/database.mjs", "migrate"], "MIGRATION_FAILED")
         helper(release, ["scripts/database.mjs", "check"], "DATABASE_CHECK_FAILED")
-        port = choose_port()
-        atomic_write(CONFIG / "server.env", environment_text(port))
+        port = choose_port(state.get("port") if old_release else None)
+        if origin_host:
+            import ipaddress
+            address = ipaddress.ip_address(origin_host)
+            origin = f"http://{'[' + address.compressed + ']' if address.version == 6 else address.compressed}:{port}"
+        else:
+            origin = state.get("origin") or f"http://127.0.0.1:{port}"
+        atomic_write(CONFIG / "server.env", environment_text(port, origin))
         atomic_write(UNIT, service_text(release, port), 0o644)
         run(["systemctl", "daemon-reload"], "SYSTEMD_RELOAD_FAILED")
         run(["systemctl", "reset-failed", SERVICE], check=False)
         run(["systemctl", "start", SERVICE], "APP_START_FAILED", timeout=45)
         health(port)
+        api_health(port)
+        helper(release, ["scripts/installer/acceptance.mjs"], "TECHNICAL_ACCEPTANCE_FAILED")
         run(["systemctl", "enable", SERVICE], "SERVICE_ENABLE_FAILED")
         state.update(phase="ready", current=release_id, previous=old_state.get("current") if old_state else None,
-                     version=version, archive_sha256=checksum, port=port, unit_sha256=digest(UNIT))
+                     version=version, archive_sha256=checksum, port=port, origin=origin,
+                     restored_from=restored_from["nonce"] if restored_from else None, unit_sha256=digest(UNIT))
+        state.pop("pending", None)
         store_state(state)
-        return {"status": "SUCCESS", "version": version, "operation": "update" if old_release else "install",
-                "migrations": "verified", "service": "active-enabled", "health": 200, "listener": f"127.0.0.1:{port}"}
+        return {"status": "SUCCESS", "version": version, "operation": "restore" if restored_from else ("update" if old_release else "install"),
+                "migrations": "verified", "service": "active-enabled", "health": 200, "port": port, "url": origin, "technical_acceptance": "passed"}
     except BaseException as error:
         # SIGTERM/HUP are converted to InstallError; never delete or restore customer data.
         for sig in (signal.SIGTERM, signal.SIGHUP, signal.SIGINT):
@@ -420,6 +486,8 @@ def install(archive_path, checksum, version):
             run(["systemctl", "disable", SERVICE], check=False)
             rollback = "manual-required" if old_release else "first-install-stopped"
             try:
+                if recovery:
+                    maintenance().undo_restore(recovery)
                 # No automatic DB restore. A committed new migration blocks code rollback.
                 if old_release and old_schema and schema(old_release) == old_schema:
                     helper(old_release, ["scripts/database.mjs", "migrate"], "OLD_SCHEMA_INCOMPATIBLE")
@@ -450,6 +518,14 @@ def main():
     parser.add_argument("--archive", type=Path)
     parser.add_argument("--sha256")
     parser.add_argument("--version")
+    parser.add_argument("--action", choices=("info", "snapshot", "abort"))
+    parser.add_argument("--purpose", choices=("daily", "update", "restore"), default="daily")
+    parser.add_argument("--hold", action="store_true")
+    parser.add_argument("--nonce")
+    parser.add_argument("--origin-host")
+    parser.add_argument("--receipt")
+    parser.add_argument("--restore-bundle", type=Path)
+    parser.add_argument("--confirm-restore", action="store_true")
     args = parser.parse_args()
     os.umask(0o077)
     os.nice(10)
@@ -460,10 +536,22 @@ def main():
     try:
         if args.probe:
             result = host_facts()
+        elif args.action:
+            with install_lock():
+                host_facts()
+                m = maintenance()
+                if args.action == "info":
+                    result = m.info()
+                elif args.action == "abort":
+                    result = m.abort(args.nonce)
+                else:
+                    m.snapshot(args.purpose, args.hold)
+                    return 0
         else:
             require(args.archive and args.sha256 and args.version, "INVALID_INSTALL_ARGUMENTS")
             with install_lock():
-                result = install(args.archive, args.sha256, args.version)
+                result = install(args.archive, args.sha256, args.version, args.origin_host,
+                                 json.loads(args.receipt) if args.receipt else None, args.restore_bundle, args.confirm_restore)
         print(json.dumps(result))
         return 0
     except Exception as error:

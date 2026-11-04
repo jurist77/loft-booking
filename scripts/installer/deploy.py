@@ -28,6 +28,10 @@ SAFE_CODES = {
     "SERVICE_ENABLE_FAILED", "SERVICE_STOP_FAILED", "SERVICE_DISABLE_FAILED", "SYSTEMD_RELOAD_FAILED",
     "MIGRATION_CHECKSUM_MISMATCH", "INVALID_MANIFEST", "INVALID_MANIFEST_SIZE", "UNSAFE_ARCHIVE_PATH",
     "ARCHIVE_LINK_OR_DEVICE_REFUSED", "INSTALL_FAILED", "INTERRUPTED", "UNSAFE_LOCK",
+    "VERIFIED_OFFSITE_BACKUP_REQUIRED", "RESTORE_CONFIRMATION_REQUIRED", "RESTORE_VERSION_SCHEMA_INCOMPATIBLE",
+    "RESTORE_DATABASE_INVALID", "RESTORE_SCHEMA_MISMATCH", "MAINTENANCE_NONCE_MISMATCH", "MAINTENANCE_SCHEMA_CHANGED",
+    "INSTALLED_APPLICATION_REQUIRED", "SNAPSHOT_SQLITE_FAILED", "SNAPSHOT_TOO_LARGE", "TECHNICAL_ACCEPTANCE_FAILED",
+    "PRODUCTION_API_UNAVAILABLE",
 }
 ROLLBACKS = {"not-needed", "manual-required", "first-install-stopped", "restored-and-health-verified"}
 
@@ -61,9 +65,21 @@ try:
         archive = pathlib.Path(folder)/'server.tar.gz'
         with code.open('wb') as output: exact(source, output, code_size)
         with archive.open('wb') as output: exact(source, output, archive_size)
+        extra = []
+        bundle_size = header.get('bundle_size', 0)
+        if bundle_size:
+            if not 0 < bundle_size < 2*1024**3 or header.get('confirmed') is not True: raise ValueError()
+            bundle = pathlib.Path(folder)/'restore.tar.gz'
+            with bundle.open('wb') as output: exact(source, output, bundle_size)
+            import hashlib
+            with bundle.open('rb') as incoming:
+                if hashlib.file_digest(incoming,'sha256').hexdigest() != header.get('bundle_sha256'): raise ValueError()
+            extra += ['--restore-bundle', str(bundle), '--confirm-restore']
+        if header.get('origin_host'): extra += ['--origin-host',header['origin_host']]
+        if header.get('receipt'): extra += ['--receipt',json.dumps(header['receipt'])]
         if source.read(1): raise ValueError()
         child = subprocess.Popen(['/usr/bin/python3', str(code), '--archive', str(archive),
-                                  '--sha256', header['sha256'], '--version', header['version']],
+                                  '--sha256', header['sha256'], '--version', header['version'], *extra],
                                  stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, start_new_session=True,
                                  env={'PATH':'/usr/sbin:/usr/bin:/sbin:/bin','LC_ALL':'C'})
         try:
@@ -100,12 +116,13 @@ def server_ip(value):
 
 
 class SSH:
-    def __init__(self, address, password, user="root", port=22):
+    def __init__(self, address, password, user="root", port=22, known_hosts=None):
         self.address, self.password, self.user, self.port = address, password, user, port
+        self.known_hosts = known_hosts
 
     def arguments(self, command):
         return ["sshpass", "-e", "ssh", "-F", "/dev/null", "-T", "-p", str(self.port),
-                "-o", "StrictHostKeyChecking=no", "-o", "UserKnownHostsFile=/dev/null",
+                "-o", "StrictHostKeyChecking=" + ("yes" if self.known_hosts else "no"), "-o", "UserKnownHostsFile=" + (str(self.known_hosts) if self.known_hosts else "/dev/null"),
                 "-o", "GlobalKnownHostsFile=/dev/null", "-o", "UpdateHostKeys=no", "-o", "LogLevel=ERROR",
                 "-o", "PreferredAuthentications=password", "-o", "PubkeyAuthentication=no",
                 "-o", "KbdInteractiveAuthentication=no", "-o", "NumberOfPasswordPrompts=1",
@@ -113,10 +130,10 @@ class SSH:
                 "-o", "ServerAliveInterval=15", "-o", "ServerAliveCountMax=3",
                 self.user + "@" + self.address, command]
 
-    def execute(self, command, stream=None, timeout=45):
+    def execute(self, command, stream=None, timeout=45, output_file=None):
         child = None
         try:
-            child = subprocess.Popen(self.arguments(command), stdin=stream, stdout=subprocess.PIPE,
+            child = subprocess.Popen(self.arguments(command), stdin=stream, stdout=output_file if output_file else subprocess.PIPE,
                                      stderr=subprocess.PIPE, start_new_session=True,
                                      env={"PATH": os.environ.get("PATH", "/usr/bin:/bin"), "LC_ALL": "C", "SSHPASS": self.password})
             output, diagnostic = child.communicate(timeout=timeout)
@@ -128,6 +145,10 @@ class SSH:
                 raise DeployError("SSH_AUTH_FAILED")
             if child.returncode == 255:
                 raise DeployError("SSH_CONNECTION_FAILED")
+            if output_file:
+                if child.returncode:
+                    raise DeployError("REMOTE_SNAPSHOT_FAILED")
+                return {"status": "DOWNLOADED"}
             if len(output) > 10000:
                 raise DeployError("REMOTE_PROTOCOL_FAILED")
             try:
@@ -167,17 +188,32 @@ def safe_result(value, version):
     return {key: value[key] for key in ("status", "version", "operation", "migrations", "service", "health", "listener")}
 
 
+def remote_source():
+    # Bundle reviewed support modules into one self-contained Python source. No
+    # credential or user data is interpolated into code; payloads remain files.
+    modules = {name: (HERE / (name + ".py")).read_text() for name in ("backup", "maintenance")}
+    prefix = "import sys,types\nfor _name,_code in " + repr(modules) + ".items():\n _module=types.ModuleType(_name);sys.modules[_name]=_module;exec(compile(_code,_name,'exec'),_module.__dict__)\n"
+    return prefix.encode() + (HERE / "remote.py").read_bytes()
+
+
 @contextlib.contextmanager
-def upload_payload(archive, version, checksum):
+def upload_payload(archive, version, checksum, origin_host=None, receipt=None, restore_bundle=None, confirmed=False):
     import tempfile
     import shutil
     with tempfile.TemporaryFile() as payload:
-        code = (HERE / "remote.py").read_bytes()
+        code = remote_source()
         header = {"code_size": len(code), "archive_size": archive.stat().st_size, "sha256": checksum, "version": version}
+        header.update(origin_host=origin_host, receipt=receipt, confirmed=confirmed)
+        if restore_bundle:
+            with restore_bundle.open("rb") as incoming:
+                header.update(bundle_size=restore_bundle.stat().st_size, bundle_sha256=hashlib.file_digest(incoming, "sha256").hexdigest())
         payload.write(json.dumps(header).encode() + b"\n")
         payload.write(code)
         with archive.open("rb") as stream:
             shutil.copyfileobj(stream, payload)
+        if restore_bundle:
+            with restore_bundle.open("rb") as stream:
+                shutil.copyfileobj(stream, payload)
         payload.seek(0)
         yield payload
 

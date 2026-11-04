@@ -1,0 +1,47 @@
+name: Back up Studio 19.25
+
+on:
+  schedule:
+    - cron: '15 0 * * *' # 03:15 Europe/Moscow; GitHub cron is UTC.
+  workflow_dispatch:
+    inputs:
+      server_ip:
+        description: "Optional override; otherwise STUDIO_BACKUP_SERVER_IP repository variable"
+        type: string
+        required: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: studio-install-${{ inputs.server_ip || vars.STUDIO_BACKUP_SERVER_IP }}
+  cancel-in-progress: false
+
+jobs:
+  backup:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - name: Main only; no backup operation on a feature branch
+        run: test "$GITHUB_REF" = refs/heads/main
+      - name: Runner transport and encryption tools (never installed on the VPS)
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends sshpass gnupg
+      - name: Consistent snapshot, encryption, upload/readback, rotation; bounded retry
+        env:
+          STUDIO_SERVER_IP: ${{ inputs.server_ip || vars.STUDIO_BACKUP_SERVER_IP }}
+          STUDIO_SSH_PASSWORD: ${{ secrets.STUDIO_SSH_PASSWORD }}
+          STUDIO_SSH_KNOWN_HOSTS: ${{ secrets.STUDIO_SSH_KNOWN_HOSTS }}
+          STUDIO_BACKUP_REPOSITORY: ${{ vars.STUDIO_BACKUP_REPOSITORY }}
+          STUDIO_BACKUP_TOKEN: ${{ secrets.STUDIO_BACKUP_TOKEN }}
+          STUDIO_BACKUP_PASSPHRASE: ${{ secrets.STUDIO_BACKUP_PASSPHRASE }}
+        run: python3 scripts/installer/manage.py daily
+      - name: Backup failure notification through GitHub
+        if: failure()
+        run: |
+          echo '::error title=Studio backup failed::Bounded retries exhausted. Check safe error code. Enable GitHub Actions failure email notifications; the application is not intentionally left stopped by a daily backup.'
+          echo 'FAILED: daily backup requires owner attention. Last successful backups were not removed to compensate for this failure.' >> "$GITHUB_STEP_SUMMARY"

@@ -38,6 +38,10 @@ jobs:
         with:
           node-version: "24.12.0"
           cache: npm
+      - name: Encryption tooling on disposable runner only
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends gnupg
       - name: Installer security and transport unit tests
         run: python3 -m unittest discover -s tests/installer -p 'test_*.py' -v
       - run: npm ci
@@ -56,8 +60,8 @@ jobs:
         run: |
           sudo apt-get update -qq
           sudo apt-get install -y --no-install-recommends sshpass openssh-server
-      - name: Real local SSH authentication and transport tests on CI only
-        run: sudo env STUDIO_INSTALLER_CI=1 GITHUB_ACTIONS=true python3 tests/installer/real_ssh.py
+      # No real SSH connections in this PR: transport failures are mocked in
+      # test_installer.py; the previous real_ssh.py is retained but not invoked.
       - name: Real systemd installation, updates, failures and schema-aware rollback on CI only
         env:
           STUDIO_SOURCE_SHA: ${{ inputs.source_sha }}

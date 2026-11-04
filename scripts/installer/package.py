@@ -61,6 +61,7 @@ def build(destination, version):
         (app / "scripts/installer").mkdir(parents=True)
         shutil.copyfile("scripts/database.mjs", app / "scripts/database.mjs")
         shutil.copyfile("scripts/installer/schema.mjs", app / "scripts/installer/schema.mjs")
+        shutil.copyfile("scripts/installer/acceptance.mjs", app / "scripts/installer/acceptance.mjs")
         copy_tree(Path("migrations/sqlite"), app / "migrations/sqlite")
         for name in ("usr/bin", "etc", "dev", "proc", "sys", "tmp", "data", "backups", "app/.next-server/cache", "licenses"):
             (root / name).mkdir(parents=True, exist_ok=True)

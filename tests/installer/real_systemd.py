@@ -18,6 +18,7 @@ import tarfile
 import tempfile
 import time
 import urllib.request
+import sys
 
 REPO = Path(__file__).resolve().parents[2]
 spec = importlib.util.spec_from_file_location("installer", REPO / "scripts/installer/remote.py")
@@ -26,6 +27,11 @@ spec.loader.exec_module(installer)
 spec_transport = importlib.util.spec_from_file_location("transport", REPO / "scripts/installer/deploy.py")
 transport = importlib.util.module_from_spec(spec_transport)
 spec_transport.loader.exec_module(transport)
+sys.path.insert(0, str(REPO / "scripts/installer"))
+import backup as lifecycle_backup
+sys.path.insert(0, str(Path(__file__).parent))
+from test_backups import FakeStore, PHRASE
+STORE = FakeStore()  # External GitHub operations are mocked, never a real repo.
 SITE_PATHS = (installer.BASE, installer.CONFIG, installer.DATA, installer.CACHE, installer.BACKUPS)
 
 
@@ -38,10 +44,32 @@ def command(args, check=True):
 
 def apply(archive, version, expected_success=True):
     checksum = installer.digest(archive)
-    with transport.upload_payload(archive, version, checksum) as payload:
+    receipt = None
+    if (installer.CONFIG / "state.json").exists():
+        current = state()
+        if current.get("phase") == "ready":
+            for r in STORE.releases():
+                meta = lifecycle_backup.managed(r)
+                if meta and meta.get("pending") and meta["instance"] == current.get("instance"):
+                    lifecycle_backup.complete_update(STORE, {"tag": r["tag_name"], "cipher_sha256": meta["cipher_sha256"]})
+        if current.get("current") and current.get("version") != version:
+            with tempfile.TemporaryDirectory(prefix="ci-offsite-") as folder:
+                plain = Path(folder) / "snapshot.tar.gz"
+                with plain.open("wb") as output:
+                    snap = subprocess.run(["python3", "-", "--action", "snapshot", "--purpose", "update", "--hold"],
+                                          input=transport.remote_source(), stdout=output, stderr=subprocess.DEVNULL, timeout=180)
+                assert snap.returncode == 0, "CI consistent snapshot failed"
+                manifest = lifecycle_backup.validate_bundle(plain)
+                cipher = Path(folder) / "snapshot.tar.gz.gpg"
+                lifecycle_backup.crypt(plain, cipher, PHRASE)
+                receipt = lifecycle_backup.publish(STORE, cipher, manifest, "preupdate")
+                receipt["bundle_sha256"] = lifecycle_backup.file_hash(plain)
+    with transport.upload_payload(archive, version, checksum, origin_host="127.0.0.1", receipt=receipt) as payload:
         result = subprocess.run(["python3", "-c", transport.BOOTSTRAP], stdin=payload, capture_output=True, text=True, timeout=1500)
     assert result.returncode == (0 if expected_success else 1), "Unexpected installer outcome: " + result.stdout[:200]
     value = json.loads(result.stdout)
+    if result.returncode == 0 and receipt:
+        lifecycle_backup.complete_update(STORE, receipt)
     print("::notice title=Installer CI phase::" + json.dumps(value), flush=True)
     return value
 
@@ -138,7 +166,7 @@ def check_isolation():
     installer.helper(release, ["-e", "const f=require('fs');if(f.existsSync('/opt/studio-ci-vpn/private.conf')||f.existsSync('/etc/shadow'))process.exit(1)"], "CI_ISOLATION_FAILED")
     pid = command(["systemctl", "show", installer.SERVICE, "-p", "MainPID", "--value"]).stdout.strip()
     rows = [line for line in command(["ss", "-H", "-lntp"]).stdout.splitlines() if f"pid={pid}," in line]
-    assert rows and all("127.0.0.1:" in row for row in rows), "Public application listener"
+    assert rows and all(("*:" in row or "[::]:" in row or "0.0.0.0:" in row) for row in rows), "Missing public test listener"
     assert command(["systemctl", "is-enabled", installer.SERVICE]).stdout.strip() == "enabled"
     # The packaged service must also serve its real page, JS/CSS and original logo.
     base = f"http://127.0.0.1:{state()['port']}"
@@ -191,7 +219,7 @@ def main():
             busy.bind(("127.0.0.1", 3000))
             busy.listen()
             first = apply(args.archive, args.version)
-            assert first["operation"] == "install" and first["listener"] != "127.0.0.1:3000"
+            assert first["operation"] == "install" and first["port"] != 3000
         assert_booking_date = create_booking()
         check_isolation()
         assert apply(args.archive, args.version)["operation"] == "already-current"
@@ -200,6 +228,7 @@ def main():
             directory = Path(temporary)
             upgraded = variant(args.archive, directory, "b" * 40)
             assert apply(upgraded, "b" * 40)["operation"] == "update"
+            assert state()["port"] == first["port"], "Update changed the assigned port"
             assert state()["previous"] is not None
             assert_booking(assert_booking_date)
             check_isolation()

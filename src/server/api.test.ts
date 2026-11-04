@@ -4,6 +4,14 @@ import { availabilityInput, bookingInput, readJson } from "./api-input";
 
 const origin = "https://studio.example";
 const settings = apiSettings({ API_PUBLIC_ORIGIN: origin });
+it("permits literal-IP HTTP only with an explicit SERVER test flag", () => {
+  for (const value of ["http://192.0.2.10:3100", "http://[2001:db8::10]:3100"]) {
+    expect(() => apiSettings({ API_PUBLIC_ORIGIN: value })).toThrow();
+    expect(apiSettings({ APP_MODE: "server", API_ALLOW_INSECURE_TEST_HTTP: "true", API_PUBLIC_ORIGIN: value }).origin).toBe(value);
+    expect(() => apiSettings({ APP_MODE: "demo", API_ALLOW_INSECURE_TEST_HTTP: "true", API_PUBLIC_ORIGIN: value })).toThrow();
+  }
+  expect(() => apiSettings({ APP_MODE: "server", API_ALLOW_INSECURE_TEST_HTTP: "true", API_PUBLIC_ORIGIN: "http://studio.example" })).toThrow();
+});
 const fixture = { requestId: "12345678-1234-4123-8123-123456789abc", resourceId: "studio-19-25", date: "2030-01-15", start: "09:00", end: "10:00", firstName: "Тест", lastName: "Пример", phone: "+79000000000" };
 const request = (body: string | Uint8Array, headers = {}) => new Request(origin, { method: "POST", headers: { "content-type": "application/json", ...headers }, body: body as BodyInit });
 
