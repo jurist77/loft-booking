@@ -45,7 +45,7 @@ Cloud: Node 24.19.0, SQLite 3.53.4, Python 3.12.14, GPG, Chromium; среда н
 
 | Проверка | Результат |
 | --- | --- |
-| Installer unit/security/backup/restore | 37 passed; реальная криптография и SQLite, внешние действия mock |
+| Installer unit/security/backup/restore | 39 passed; реальная криптография и SQLite, внешние действия mock |
 | `npm test` | 152 passed |
 | `npm run test:integration` | 57 passed, настоящая SQLite |
 | `npm run typecheck`, `npm run lint` | Passed |
@@ -57,12 +57,12 @@ Cloud: Node 24.19.0, SQLite 3.53.4, Python 3.12.14, GPG, Chromium; среда н
 | SERVER/DEMO E2E (`npm run test:server:ui`) | 20 SERVER + 26 DEMO passed, mobile/desktop, настоящая SQLite и static DEMO |
 | Isolated installer acceptance CLI | Passed: real SQLite/HTTP, booking201/conflict409/restart→persistence; временная БД очищена |
 | YAML / needs / Python syntax / diff | 8 workflows распарсены PyYAML; зависимости jobs валидны, Python compile, diff --check passed. Actionlint отсутствует |
-| Новый GitHub CI | Не подтверждён: api.github.com возвращает Forbidden в текущем runtime; требуемый domain сохранён в cloud draft, но ещё не опубликован |
+| Новый GitHub CI | Запуски видны на публичной Checks-странице PR; окончательные native результаты текущей редакции ещё не подтверждены при фиксации отчёта. api.github.com возвращает Forbidden, draft domain ещё не опубликован |
 | Реальные SSH/VPS/backup Releases | **Не выполнялись**, запрещены ТЗ |
 
 Один первый локальный `test:demo:isolation` завершился `INVALID_NODE_DEMO` при startup probe; повторный полный запуск прошёл без изменения или ослабления теста. Точная причина первого transient response не установлена, поэтому это не скрывается за заявлением «всё стабильно». Требуется новый CI и последующая отдельная эксплуатационная приёмка.
 
-При подготовке исправлены: chronological rotation после смены instance; cleanup собственного неподтверждённого draft; nonce/schema-safe release snapshot hold при transfer failure; завершение ephemeral GPG agent; проверка полноты и SQLite magic в пакете; fsync staged restore до rename. Все исходные прикладные тесты сохранены.
+При подготовке исправлены: chronological rotation после смены instance; cleanup собственного неподтверждённого draft; nonce/schema-safe release snapshot hold при transfer failure; завершение ephemeral GPG agent без наследования Secrets; проверка полноты и SQLite magic в пакете; fsync staged restore до rename; IPv4-only kernel; проверка ключа до SSH. Старый deploy CLI переведён на общий backup barrier/валидатор результата, чтобы не оставлять обход обязательной копии или устаревший loopback-контракт. Все исходные прикладные тесты сохранены.
 
 ## Что остаётся проверить
 

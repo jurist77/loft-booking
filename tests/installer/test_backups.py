@@ -96,6 +96,16 @@ def bundle(directory, day=1, nonce=None):
 
 
 class BackupTests(unittest.TestCase):
+    def test_invalid_encryption_configuration_fails_before_any_ssh(self):
+        for phrase in ("short", "a" * 32 + "\n", "a" * 1025):
+            with patch.dict(os.environ, {"STUDIO_BACKUP_REPOSITORY": "owner/private-backups", "STUDIO_BACKUP_TOKEN": "synthetic-token",
+                                        "STUDIO_BACKUP_PASSPHRASE": phrase}), \
+                    patch.object(sys, "argv", ["manage", "install"]), patch.object(manage, "connection") as ssh, patch.object(manage, "summary"):
+                self.assertEqual(manage.main(), 1)
+                ssh.assert_not_called()
+        with self.assertRaises(backup.BackupError):
+            backup.validate_passphrase("a" * 32 + "\x00")
+
     def test_rotation_uses_time_across_instances_and_deletes_release_and_tag(self):
         store = FakeStore()
         with tempfile.TemporaryDirectory() as folder:

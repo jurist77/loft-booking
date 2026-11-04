@@ -4,7 +4,6 @@ No network, encryption keys or backup token on the host. The adapter is the
 existing installer; tests supply an isolated filesystem/service adapter.
 """
 import datetime as dt
-import hashlib
 import json
 import os
 from pathlib import Path

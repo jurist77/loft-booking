@@ -2,10 +2,8 @@
 """GitHub runner coordinator. No real external operations are run by unit tests."""
 import argparse
 import contextlib
-import hashlib
 import http.client
 import io
-import ipaddress
 import json
 import os
 from pathlib import Path
@@ -13,8 +11,8 @@ import re
 import shlex
 import tempfile
 import time
-from backup import BackupError, GitHubStore, crypt, validate_bundle, publish, retrieve, complete_update, file_hash, managed
-from deploy import SSH, DeployError, remote_source, upload_payload, BOOTSTRAP, server_ip
+from backup import BackupError, GitHubStore, crypt, validate_bundle, validate_passphrase, publish, retrieve, complete_update, file_hash, managed
+from deploy import SSH, DeployError, remote_source, upload_payload, BOOTSTRAP, server_ip, safe_result
 
 
 class Peer:
@@ -50,21 +48,7 @@ class Peer:
             raise DeployError("ARTIFACT_CHECKSUM_MISMATCH")
         with upload_payload(archive, version, checksum, self.address, receipt, bundle, confirmed=bool(bundle)) as stream:
             result = self.ssh.execute("python3 -c " + shlex.quote(BOOTSTRAP), stream, timeout=1800)
-        port = result.get("port")
-        if type(port) is not int or not (port == 3000 or 3100 <= port <= 3199):
-            raise DeployError("REMOTE_PROTOCOL_FAILED")
-        expected = public_url(self.address, port)
-        if (result.get("status") != "SUCCESS" or result.get("version") != version or result.get("url") != expected or
-                result.get("health") != 200 or result.get("technical_acceptance") != "passed" or
-                result.get("operation") not in ("install", "update", "restore", "already-current") or
-                result.get("migrations") not in ("unchanged", "verified") or result.get("service") != "active-enabled"):
-            raise DeployError("REMOTE_PROTOCOL_FAILED")
-        return {key: result[key] for key in ("status", "version", "url", "port", "operation", "migrations", "service", "health", "technical_acceptance")}
-
-
-def public_url(address, port):
-    parsed = ipaddress.ip_address(address)
-    return f"http://{'[' + parsed.compressed + ']' if parsed.version == 6 else parsed.compressed}:{port}"
+        return safe_result(result, version, self.address)
 
 
 def public_access(address, port):
@@ -141,6 +125,7 @@ def run_install(peer, store, phrase, artifacts, version, bundle=None):
     if receipt and receipt.get("unavailable"):
         result["pre_restore_preservation"] = "local_original_directory_retained; offsite checkpoint unavailable"
     result["public_access"] = public_access(peer.address, result["port"])
+    result["ssh"] = "connected"
     result["warning"] = "HTTP_TEST_ONLY_SYNTHETIC_CONTACTS"
     return result
 
@@ -187,8 +172,7 @@ def main():
                        for r in store.releases() if (m := managed(r))]
             summary({"status": "LIST_ONLY", "backups": entries})
             return 0
-        if len(phrase) < 32:
-            raise BackupError("BACKUP_PASSPHRASE_REQUIRES_32_CHARACTERS")
+        validate_passphrase(phrase)
         if args.operation in ("inspect", "restore") and os.environ.get("STUDIO_RESTORE_CONFIRMATION") != "RESTORE STUDIO 19.25":
             raise BackupError("RESTORE_CONFIRMATION_REQUIRED")
         if args.operation == "inspect":

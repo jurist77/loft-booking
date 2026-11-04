@@ -1,6 +1,5 @@
 #!/usr/bin/env python3
 """Encrypted Release storage. External operations are injected/mocked in tests."""
-import contextlib
 import datetime as dt
 import hashlib
 import json
@@ -11,7 +10,6 @@ import subprocess
 import tarfile
 import tempfile
 import time
-import uuid
 
 MAX_ASSET = 1900 * 1024**2  # GitHub limit is strictly <2 GiB; keep a margin.
 TAG = re.compile(r"studio1925-(daily|preupdate)-([a-f0-9]{32})-(\d{8}T\d{6}Z)-([a-f0-9]{32})")
@@ -67,9 +65,13 @@ def validate_bundle(path, destination=None):
         return manifest
 
 
-def crypt(source, destination, passphrase, decrypt=False):
+def validate_passphrase(passphrase):
     if not 32 <= len(passphrase) <= 1024 or len(passphrase.encode()) > 4096 or "\n" in passphrase or "\x00" in passphrase:
         raise BackupError("BACKUP_PASSPHRASE_REQUIRES_32_CHARACTERS")
+
+
+def crypt(source, destination, passphrase, decrypt=False):
+    validate_passphrase(passphrase)
     read_fd, write_fd = os.pipe()
     try:
         os.write(write_fd, passphrase.encode() + b"\n")

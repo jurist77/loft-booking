@@ -177,11 +177,11 @@ class InstallerTests(unittest.TestCase):
 
     def test_success_is_whitelisted_and_requires_health_200(self):
         result = {"status": "SUCCESS", "version": VERSION, "health": 200, "service": "active-enabled",
-                  "migrations": "verified", "operation": "install", "listener": "127.0.0.1:3100", "secret": SECRET}
-        self.assertNotIn(SECRET, json.dumps(deploy.safe_result(result, VERSION)))
-        for key, bad in (("health", 503), ("listener", "0.0.0.0:3100"), ("version", "b" * 40), ("operation", SECRET)):
+                  "migrations": "verified", "operation": "install", "port": 3100, "url": "http://203.0.113.9:3100", "technical_acceptance": "passed", "secret": SECRET}
+        self.assertNotIn(SECRET, json.dumps(deploy.safe_result(result, VERSION, "203.0.113.9")))
+        for key, bad in (("health", 503), ("url", "http://203.0.113.10:3100"), ("port", 443), ("technical_acceptance", "failed"), ("version", "b" * 40), ("operation", SECRET)):
             with self.assertRaises(deploy.DeployError):
-                deploy.safe_result({**result, key: bad}, VERSION)
+                deploy.safe_result({**result, key: bad}, VERSION, "203.0.113.9")
 
     def test_missing_secret_fails_before_ssh_without_dumping_environment(self):
         with patch.dict(deploy.os.environ, {"STUDIO_SSH_PASSWORD": "", "GITHUB_STEP_SUMMARY": ""}), \

@@ -4,7 +4,7 @@
 
 ## Подготовка GitHub
 
-1. Создайте **отдельный приватный репозиторий** для копий: GitHub → New repository → Private → Add README. Имя произвольное. Пустой неинициализированный или публичный репозиторий не подходит. Не загружайте архивы через Git: используются только Release assets.
+1. Создайте **отдельный приватный репозиторий** для копий: GitHub → New repository → Private → Add README. Имя произвольное. Пустой неинициализированный или публичный репозиторий не подходит. Не загружайте архивы через Git: используются только Release assets. Для этого репозитория не включайте immutable Releases и не блокируйте служебные теги `studio1925-*` правилами, запрещающими очистку: workflow должен менять pending metadata и удалять устаревшие копии. Код не отключает защиты автоматически; при запрете API завершится FAILED.
 2. В GitHub Settings → Developer settings → Fine-grained personal access tokens создайте отдельный токен: доступ **только к backup-репозиторию**, Repository permissions **Contents: Read and write**, Metadata: Read. Не выдавайте доступ ко всем репозиториям, Actions, администрированию или организации. Учитывайте срок действия и возможное одобрение владельцем организации. Стандартный `GITHUB_TOKEN` приложения не даёт доступа к другому private repo.
 3. В `jurist77/loft-booking` → Settings → Secrets and variables → Actions создайте следующие **Secrets**. Не передавайте значения в чат, PR, issue или Run workflow.
 

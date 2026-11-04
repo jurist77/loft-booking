@@ -178,14 +178,18 @@ class SSH:
                     child.wait()
 
 
-def safe_result(value, version):
-    if (value.get("status") != "SUCCESS" or value.get("version") != version or
-            value.get("health") != 200 or value.get("operation") not in ("install", "update", "already-current") or
-            value.get("migrations") not in ("verified", "unchanged") or
-            value.get("service") not in ("active", "active-enabled") or
-            not re.fullmatch(r"127\.0\.0\.1:(?:3000|31\d\d)", str(value.get("listener", "")))):
+def safe_result(value, version, address):
+    port = value.get("port")
+    if type(port) is not int or not (port == 3000 or 3100 <= port <= 3199):
         raise DeployError("REMOTE_PROTOCOL_FAILED")
-    return {key: value[key] for key in ("status", "version", "operation", "migrations", "service", "health", "listener")}
+    parsed = ipaddress.ip_address(address)
+    expected = f"http://{'[' + parsed.compressed + ']' if parsed.version == 6 else parsed.compressed}:{port}"
+    if (value.get("status") != "SUCCESS" or value.get("version") != version or value.get("url") != expected or
+            value.get("health") != 200 or value.get("technical_acceptance") != "passed" or
+            value.get("operation") not in ("install", "update", "restore", "already-current") or
+            value.get("migrations") not in ("verified", "unchanged") or value.get("service") != "active-enabled"):
+        raise DeployError("REMOTE_PROTOCOL_FAILED")
+    return {key: value[key] for key in ("status", "version", "url", "port", "operation", "migrations", "service", "health", "technical_acceptance")}
 
 
 def remote_source():
@@ -219,29 +223,17 @@ def upload_payload(archive, version, checksum, origin_host=None, receipt=None, r
 
 
 def deploy(address, artifacts, version, password):
-    require_version = re.fullmatch(r"[0-9a-f]{40}", version)
-    if not require_version:
+    # Compatibility CLI uses the same mandatory offsite barrier as workflows.
+    from backup import GitHubStore, validate_passphrase
+    from manage import connection, run_install
+    if not re.fullmatch(r"[0-9a-f]{40}", version):
         raise DeployError("INVALID_VERSION")
-    ssh = SSH(server_ip(address), password)
-    with (HERE / "remote.py").open("rb") as source:
-        probe_command = "if ! python3 -c 'import sys;sys.exit(0 if sys.version_info >= (3,12) else 1)' >/dev/null 2>&1; then printf '%s' '{\"status\":\"FAILED\",\"code\":\"PYTHON_3_12_REQUIRED\"}'; exit 1; fi; exec python3 - --probe"
-        probe = ssh.execute(probe_command, source)
-    if probe.get("status") != "CONNECTED" or probe.get("arch") not in ("x64", "arm64"):
-        raise DeployError("REMOTE_PROTOCOL_FAILED")
-    print("SSH_CONNECTED; Ubuntu 24.04; architecture=" + probe["arch"], flush=True)
-    archive = artifacts / ("studio-server-" + probe["arch"]) / "server.tar.gz"
-    checksum_path = Path(str(archive) + ".sha256")
-    if not archive.is_file() or not checksum_path.is_file():
-        raise DeployError("ARTIFACT_MISSING")
-    checksum = checksum_path.read_text().strip()
-    with archive.open("rb") as stream:
-        if hashlib.file_digest(stream, "sha256").hexdigest() != checksum:
-            raise DeployError("ARTIFACT_CHECKSUM_MISMATCH")
-    # tempfile here contains only code/archive, never password. It bounds memory usage.
-    import shlex
-    with upload_payload(archive, version, checksum) as payload:
-        value = ssh.execute("python3 -c " + shlex.quote(BOOTSTRAP), payload, timeout=1800)
-    return safe_result(value, version)
+    phrase = os.environ.get("STUDIO_BACKUP_PASSPHRASE", "")
+    validate_passphrase(phrase)
+    store = GitHubStore(os.environ.get("STUDIO_BACKUP_REPOSITORY", ""), os.environ.get("STUDIO_BACKUP_TOKEN", ""))
+    store.verify_private()
+    with connection(server_ip(address), password, strict=False) as peer:
+        return run_install(peer, store, phrase, artifacts, version)
 
 
 def main():
@@ -254,15 +246,8 @@ def main():
         if not password:
             raise DeployError("STUDIO_SSH_PASSWORD_MISSING")
         result = deploy(os.environ.get("STUDIO_SERVER_IP", ""), args.artifacts, args.version, password)
-        message = json.dumps(result)
-        print(message)
-        summary = os.environ.get("GITHUB_STEP_SUMMARY")
-        if summary:
-            with open(summary, "a") as stream:
-                stream.write("## Studio 19.25 — SUCCESS\n\nSSH: connected\n\n```json\n" + message + "\n```\n\n")
-                stream.write("Listener is private. No public HTTPS was configured. Use a verified SSH local tunnel to this listener; replace `<server_ip>` with your workflow input.\n\n")
-                port = result["listener"].split(":")[1]
-                stream.write(f"`ssh -N -T -L 127.0.0.1:{port}:127.0.0.1:{port} root@<server_ip>`\n\nOpen `http://127.0.0.1:{port}` on the same device.\n")
+        from manage import summary
+        summary(result)
         return 0
     except Exception as error:
         code = str(error) if isinstance(error, DeployError) else "DEPLOY_FAILED"
