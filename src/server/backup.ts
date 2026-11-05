@@ -15,7 +15,10 @@ export async function backupDatabase(db: Database.Database, destination: string)
     reservePrivateFile(partial); created = true;
     const deadline = Date.now() + 60000;
     await db.backup(partial, { progress() { if (Date.now() > deadline) throw new Error("BACKUP_TIMEOUT"); return 100; } });
-    const check = new Database(partial, { readonly: true, fileMustExist: true });
+    // This is our private temporary output, not the live source. Opening its
+    // verifier read/write lets SQLite clean its own WAL/SHM on close; a readonly
+    // last connection leaves orphan journals named after the temporary file.
+    const check = new Database(partial, { fileMustExist: true });
     try { assertIntegrity(check, true); } finally { check.close(); }
     const fd = openSync(partial, "r"); try { fsyncSync(fd); } finally { closeSync(fd); }
     linkSync(partial, target); // atomic, refuses to overwrite an existing backup/database

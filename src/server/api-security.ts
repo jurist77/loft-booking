@@ -9,7 +9,11 @@ export function apiSettings(env: Env = process.env) {
     const origin = env.API_PUBLIC_ORIGIN ?? "http://127.0.0.1:3000";
     const url = new URL(origin);
     const loopback = ["localhost", "127.0.0.1", "[::1]"].includes(url.hostname);
-    if (url.origin !== origin || url.username || url.password || (url.protocol !== "https:" && !(loopback && url.protocol === "http:"))) throw new Error();
+    // Explicit temporary IP-only SERVER testing. Default/public production still
+    // requires HTTPS; this flag never creates routes in the static DEMO.
+    const literalHost = url.hostname.replace(/^\[|\]$/g, "");
+    const testHttp = env.APP_MODE === "server" && env.API_ALLOW_INSECURE_TEST_HTTP === "true" && isIP(literalHost) !== 0;
+    if (url.origin !== origin || url.username || url.password || (url.protocol !== "https:" && !((loopback || testHttp) && url.protocol === "http:"))) throw new Error();
     if (env.API_TRUST_PROXY !== undefined && !["true", "false"].includes(env.API_TRUST_PROXY)) throw new Error();
     return { origin, trustProxy: env.API_TRUST_PROXY === "true" };
   } catch { throw new ApiError("API_UNAVAILABLE"); }
