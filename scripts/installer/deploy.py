@@ -117,13 +117,12 @@ def server_ip(value):
 
 
 class SSH:
-    def __init__(self, address, password, user="root", port=22, known_hosts=None):
+    def __init__(self, address, password, user="root", port=22):
         self.address, self.password, self.user, self.port = address, password, user, port
-        self.known_hosts = known_hosts
 
     def arguments(self, command):
         return ["sshpass", "-e", "ssh", "-F", "/dev/null", "-T", "-p", str(self.port),
-                "-o", "StrictHostKeyChecking=" + ("yes" if self.known_hosts else "no"), "-o", "UserKnownHostsFile=" + (str(self.known_hosts) if self.known_hosts else "/dev/null"),
+                "-o", "StrictHostKeyChecking=no", "-o", "UserKnownHostsFile=/dev/null",
                 "-o", "GlobalKnownHostsFile=/dev/null", "-o", "UpdateHostKeys=no", "-o", "LogLevel=ERROR",
                 "-o", "PreferredAuthentications=password", "-o", "PubkeyAuthentication=no",
                 "-o", "KbdInteractiveAuthentication=no", "-o", "NumberOfPasswordPrompts=1",
@@ -233,7 +232,7 @@ def deploy(address, artifacts, version, password):
     validate_passphrase(phrase)
     store = GitHubStore(os.environ.get("STUDIO_BACKUP_REPOSITORY", ""), os.environ.get("STUDIO_BACKUP_TOKEN", ""))
     store.verify_private()
-    with connection(server_ip(address), password, strict=False) as peer:
+    with connection(server_ip(address), password) as peer:
         return run_install(peer, store, phrase, artifacts, version)
 
 

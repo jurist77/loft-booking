@@ -108,22 +108,31 @@ class GitHubStore:
         if repo.lower() == os.environ.get("GITHUB_REPOSITORY", "").lower():
             raise BackupError("SEPARATE_BACKUP_REPOSITORY_REQUIRED")
 
-    def command(self, args, output=None, payload=None, json_output=True):
+    def command(self, args, output=None, payload=None, json_output=True, missing_ok=False):
         try:
             result = subprocess.run(["gh", *args], input=json.dumps(payload).encode() if payload is not None else None,
                                     stdout=output if output else subprocess.PIPE, stderr=subprocess.DEVNULL,
                                     env={"PATH": os.environ.get("PATH", "/usr/bin:/bin"), "GH_TOKEN": self.token, "LC_ALL": "C"}, timeout=600)
+            data = result.stdout or b""
+            if missing_ok:
+                # --include is requested only for bounded JSON API operations.
+                # Inspect HTTP status, never classify arbitrary stderr as 404.
+                header, data = re.split(rb"\r?\n\r?\n", data, maxsplit=1)
+                if re.match(rb"HTTP/\S+\s+404(?:\s|$)", header):
+                    return None
             if result.returncode:
                 raise BackupError("BACKUP_GITHUB_OPERATION_FAILED")
-            return None if output or not json_output else json.loads(result.stdout or b"null")
+            return None if output or not json_output else json.loads(data or b"null")
         except (OSError, subprocess.SubprocessError, ValueError):
             raise BackupError("BACKUP_GITHUB_OPERATION_FAILED") from None
 
-    def api(self, path, method="GET", payload=None):
+    def api(self, path, method="GET", payload=None, missing_ok=False):
         args = ["api", "repos/" + self.repo + path, "--method", method]
+        if missing_ok:
+            args.append("--include")
         if payload is not None:
             args += ["--input", "-"]
-        return self.command(args, payload=payload)
+        return self.command(args, payload=payload, missing_ok=missing_ok)
 
     def verify_private(self):
         meta = self.api("")
@@ -169,10 +178,18 @@ class GitHubStore:
     def delete(self, release):
         if not TAG.fullmatch(release["tag_name"]):
             raise BackupError("BACKUP_DELETE_OUTSIDE_NAMESPACE")
-        self.api(f"/releases/{release['id']}", "DELETE")
-        # Only our unique managed tag, never branches/other tags.
+        # Keep the release discoverable until its tag is gone. If deletion of
+        # either object fails, the next rotation can finish without orphan tags.
         if not release.get("draft"):
-            self.api("/git/refs/tags/" + release["tag_name"], "DELETE")
+            lookup = "/git/ref/tags/" + release["tag_name"]
+            if self.api(lookup, missing_ok=True) is not None:
+                try:
+                    self.api("/git/refs/tags/" + release["tag_name"], "DELETE")
+                except BackupError:
+                    # A lost response/concurrent cleanup may have deleted it.
+                    if self.api(lookup, missing_ok=True) is not None:
+                        raise
+        self.api(f"/releases/{release['id']}", "DELETE", missing_ok=True)
 
 
 def managed(release, drafts=False):

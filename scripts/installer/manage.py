@@ -131,19 +131,12 @@ def run_install(peer, store, phrase, artifacts, version, bundle=None):
 
 
 @contextlib.contextmanager
-def connection(address, password, strict):
+def connection(address, password):
     if not password:
         raise DeployError("STUDIO_SSH_PASSWORD_MISSING")
-    with tempfile.TemporaryDirectory(prefix="studio-known-hosts-") as directory:
-        path = None
-        if strict:
-            value = os.environ.get("STUDIO_SSH_KNOWN_HOSTS", "")
-            if not value:
-                raise DeployError("STUDIO_SSH_KNOWN_HOSTS_MISSING")
-            path = Path(directory) / "known_hosts"
-            path.write_text(value)
-            os.chmod(path, 0o600)
-        yield Peer(SSH(address, password, known_hosts=path), address)
+    # Owner-approved policy for every Studio operation; command options only.
+    # Never edits global SSH configuration on either the runner or the VPS.
+    yield Peer(SSH(address, password), address)
 
 
 def summary(value):
@@ -181,7 +174,7 @@ def main():
             summary({"status": "RESTORE_VALIDATED", "backup_version": manifest["version"], "selected_version": args.version})
             return 0
         address = server_ip(os.environ.get("STUDIO_SERVER_IP", ""))
-        with connection(address, os.environ.get("STUDIO_SSH_PASSWORD", ""), strict=args.operation != "install") as peer:
+        with connection(address, os.environ.get("STUDIO_SSH_PASSWORD", "")) as peer:
             if args.operation == "daily":
                 for attempt in range(2):
                     try:

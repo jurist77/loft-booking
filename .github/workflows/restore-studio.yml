@@ -96,13 +96,12 @@ jobs:
       - run: |
           sudo apt-get update -qq
           sudo apt-get install -y --no-install-recommends sshpass gnupg
-      - name: Explicit restore with strict SSH host identity, preservation and acceptance
+      - name: Explicit restore with owner-approved SSH policy, preservation and acceptance
         env:
           STUDIO_SERVER_IP: ${{ inputs.server_ip }}
           STUDIO_RESTORE_CONFIRMATION: ${{ inputs.confirmation }}
           STUDIO_BACKUP_TAG: ${{ inputs.backup_tag }}
           STUDIO_SSH_PASSWORD: ${{ secrets.STUDIO_SSH_PASSWORD }}
-          STUDIO_SSH_KNOWN_HOSTS: ${{ secrets.STUDIO_SSH_KNOWN_HOSTS }}
           STUDIO_BACKUP_REPOSITORY: ${{ vars.STUDIO_BACKUP_REPOSITORY }}
           STUDIO_BACKUP_TOKEN: ${{ secrets.STUDIO_BACKUP_TOKEN }}
           STUDIO_BACKUP_PASSPHRASE: ${{ secrets.STUDIO_BACKUP_PASSPHRASE }}

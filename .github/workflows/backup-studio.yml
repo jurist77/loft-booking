@@ -35,7 +35,6 @@ jobs:
         env:
           STUDIO_SERVER_IP: ${{ inputs.server_ip || vars.STUDIO_BACKUP_SERVER_IP }}
           STUDIO_SSH_PASSWORD: ${{ secrets.STUDIO_SSH_PASSWORD }}
-          STUDIO_SSH_KNOWN_HOSTS: ${{ secrets.STUDIO_SSH_KNOWN_HOSTS }}
           STUDIO_BACKUP_REPOSITORY: ${{ vars.STUDIO_BACKUP_REPOSITORY }}
           STUDIO_BACKUP_TOKEN: ${{ secrets.STUDIO_BACKUP_TOKEN }}
           STUDIO_BACKUP_PASSPHRASE: ${{ secrets.STUDIO_BACKUP_PASSPHRASE }}

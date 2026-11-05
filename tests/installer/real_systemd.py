@@ -43,7 +43,7 @@ def command(args, check=True):
     return result
 
 
-def apply(archive, version, expected_success=True, restore_bundle=None):
+def apply(archive, version, expected_success=True, restore_bundle=None, origin_host="127.0.0.1"):
     checksum = installer.digest(archive)
     receipt = None
     if (installer.CONFIG / "state.json").exists():
@@ -72,7 +72,7 @@ def apply(archive, version, expected_success=True, restore_bundle=None):
                 lifecycle_backup.crypt(plain, cipher, PHRASE)
                 receipt = lifecycle_backup.publish(STORE, cipher, manifest, "preupdate")
                 receipt["bundle_sha256"] = lifecycle_backup.file_hash(plain)
-    with transport.upload_payload(archive, version, checksum, origin_host="127.0.0.1", receipt=receipt,
+    with transport.upload_payload(archive, version, checksum, origin_host=origin_host, receipt=receipt,
                                   restore_bundle=restore_bundle, confirmed=bool(restore_bundle)) as payload:
         result = subprocess.run(["python3", "-c", transport.BOOTSTRAP], stdin=payload, capture_output=True, text=True, timeout=1500)
     assert result.returncode == (0 if expected_success else 1), "Unexpected installer outcome: " + result.stdout[:200]
@@ -231,7 +231,11 @@ def main():
             assert first["operation"] == "install" and first["port"] != 3000
         assert_booking_date = create_booking()
         check_isolation()
+        original_release = state()["current"]
+        original_pid = command(["systemctl", "show", installer.SERVICE, "-p", "MainPID", "--value"]).stdout
         assert apply(args.archive, args.version)["operation"] == "already-current"
+        assert state()["current"] == original_release, "No-op replaced the release"
+        assert command(["systemctl", "show", installer.SERVICE, "-p", "MainPID", "--value"]).stdout == original_pid, "No-op restarted the application"
         assert_booking(assert_booking_date)
         with tempfile.TemporaryDirectory(prefix="studio-ci-artifacts-") as temporary:
             directory = Path(temporary)
@@ -296,6 +300,20 @@ def main():
             assert command(["systemctl", "is-active", installer.SERVICE], check=False).returncode != 0
             assert (installer.DATA / "studio.sqlite").exists()
             assert apply(args.archive, args.version)["status"] == "SUCCESS"
+            assert_unchanged(before)
+            # A fresh managed identity/data directory represents another
+            # compatible VPS. Only a TEST-NET Origin changes, never a real
+            # external connection. The same encrypted backup was verified above.
+            source_instance = metadata["instance"]
+            cleanup()
+            restored = apply(args.archive, args.version, restore_bundle=retrieved, origin_host="192.0.2.2")
+            assert restored["operation"] == "restore"
+            assert restored["url"] == f"http://192.0.2.2:{state()['port']}"
+            assert state()["instance"] != source_instance
+            assert_booking(assert_booking_date)
+            assert (installer.DATA / "photos/ci-photo.jpg").read_bytes() == b"synthetic original photo"
+            assert json.loads((installer.DATA / "settings/studio.json").read_text())["fixture"] == "original"
+            check_isolation()
             assert_unchanged(before)
         assert installer.digest(args.archive) == original_checksum, "Verified package was modified by tests"
         print("REAL_CI_SYSTEMD_OK: install/repeat/update/occupied-port/migration/start/rollback/schema-change/data/isolation/network")

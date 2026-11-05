@@ -123,8 +123,9 @@ class BackupTests(unittest.TestCase):
         release = store.items[0]
         with patch.object(client, "api") as api:
             client.delete(release)
-        self.assertEqual(api.call_args_list[0].args, (f"/releases/{release['id']}", "DELETE"))
+        self.assertEqual(api.call_args_list[0].args, ("/git/ref/tags/" + release["tag_name"],))
         self.assertEqual(api.call_args_list[1].args, ("/git/refs/tags/" + release["tag_name"], "DELETE"))
+        self.assertEqual(api.call_args_list[2].args, (f"/releases/{release['id']}", "DELETE"))
 
     def test_noop_does_not_backup_or_restart_and_public_access_is_separate(self):
         from unittest.mock import Mock
@@ -154,18 +155,18 @@ class BackupTests(unittest.TestCase):
             self.assertEqual(manage.main(), 1)
             ssh.assert_not_called()
 
-    def test_maintenance_ssh_requires_pinned_identity_and_has_no_global_changes(self):
-        with patch.dict(os.environ, {"STUDIO_SSH_KNOWN_HOSTS": ""}), patch.object(manage, "SSH") as ssh:
-            with self.assertRaisesRegex(manage.DeployError, "STUDIO_SSH_KNOWN_HOSTS_MISSING"):
-                with manage.connection("192.0.2.1", "synthetic-password", strict=True): pass
-            ssh.assert_not_called()
-            with manage.connection("192.0.2.1", "synthetic-password", strict=False): pass
-            self.assertIsNone(ssh.call_args.kwargs["known_hosts"])
-        with patch.dict(os.environ, {"STUDIO_SSH_KNOWN_HOSTS": "192.0.2.1 ssh-ed25519 synthetic-public-key"}), patch.object(manage, "SSH") as ssh:
-            with manage.connection("192.0.2.1", "synthetic-password", strict=True):
-                known = ssh.call_args.kwargs["known_hosts"]
-                self.assertEqual(known.stat().st_mode & 0o777, 0o600)
-            self.assertFalse(known.exists())
+    def test_all_operations_share_command_scoped_ssh_policy_without_host_key_secret(self):
+        with patch.dict(os.environ, {}, clear=True):
+            with manage.connection("192.0.2.1", "synthetic-password") as peer:
+                args = peer.ssh.arguments("true")
+                for option in ("StrictHostKeyChecking=no", "UserKnownHostsFile=/dev/null", "GlobalKnownHostsFile=/dev/null", "UpdateHostKeys=no"):
+                    self.assertIn(option, args)
+                self.assertEqual(args[args.index("-F") + 1], "/dev/null")
+                self.assertNotIn("synthetic-password", " ".join(args))
+        for name in ("install-studio.yml", "backup-studio.yml", "restore-studio.yml"):
+            workflow = (SCRIPTS.parents[1] / ".github/workflows" / name).read_text()
+            self.assertNotIn("STUDIO_SSH_KNOWN_HOSTS", workflow)
+            self.assertIn("secrets.STUDIO_SSH_PASSWORD", workflow)
 
     def test_real_encryption_restore_photos_settings_and_sqlite(self):
         with tempfile.TemporaryDirectory() as folder:
