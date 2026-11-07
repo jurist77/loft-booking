@@ -1,0 +1,52 @@
+name: Diagnose Studio network
+
+on:
+  workflow_dispatch:
+    inputs:
+      server_ip:
+        description: "Studio VPS IPv4 or IPv6; read-only checks, no repair"
+        type: string
+        required: true
+
+permissions:
+  contents: read
+
+concurrency:
+  group: studio-network-diagnostic-${{ inputs.server_ip }}
+  cancel-in-progress: false
+
+jobs:
+  diagnose:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - name: Validate literal IP and existing password Secret before any network check
+        env:
+          STUDIO_SERVER_IP: ${{ inputs.server_ip }}
+          STUDIO_PASSWORD_PRESENT: ${{ secrets.STUDIO_SSH_PASSWORD != '' }}
+        run: |
+          python3 - <<'PY'
+          import os,sys
+          sys.path.insert(0,'scripts/installer')
+          from deploy import server_ip,DeployError
+          try:
+              server_ip(os.environ.get('STUDIO_SERVER_IP',''))
+              if os.environ.get('STUDIO_PASSWORD_PRESENT') != 'true': raise DeployError('STUDIO_SSH_PASSWORD_MISSING')
+          except DeployError as error:
+              print('FAILED: '+str(error));sys.exit(1)
+          PY
+      - name: SSH client tooling on disposable runner only
+        run: |
+          if ! command -v sshpass >/dev/null; then
+            sudo apt-get update -qq
+            sudo apt-get install -y --no-install-recommends sshpass
+          fi
+      - name: Read-only Studio service, binds, health and firewall summaries
+        env:
+          STUDIO_SERVER_IP: ${{ inputs.server_ip }}
+          STUDIO_SSH_PASSWORD: ${{ secrets.STUDIO_SSH_PASSWORD }}
+        run: PYTHONDONTWRITEBYTECODE=1 python3 scripts/diagnostics/studio_network.py
