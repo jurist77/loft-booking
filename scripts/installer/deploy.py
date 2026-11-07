@@ -4,6 +4,7 @@ import argparse
 import contextlib
 import hashlib
 import ipaddress
+import io
 import json
 import os
 from pathlib import Path
@@ -166,16 +167,27 @@ class SSH:
             return value
         except FileNotFoundError:
             raise DeployError("SSH_TOOLS_MISSING") from None
+        except io.UnsupportedOperation:
+            # A local incompatible stdin/stdout is not an SSH outage/timeout.
+            raise DeployError("SSH_STREAM_UNSUPPORTED") from None
         except (OSError, subprocess.SubprocessError):
             raise DeployError("SSH_TIMEOUT_OR_TRANSPORT_FAILED") from None
         finally:
-            if child and child.poll() is None:
-                os.killpg(child.pid, signal.SIGTERM)
+            if child:
                 try:
-                    child.wait(timeout=15)
-                except subprocess.TimeoutExpired:
-                    os.killpg(child.pid, signal.SIGKILL)
-                    child.wait()
+                    if child.poll() is None:
+                        os.killpg(child.pid, signal.SIGTERM)
+                        try:
+                            child.wait(timeout=15)
+                        except subprocess.TimeoutExpired:
+                            os.killpg(child.pid, signal.SIGKILL)
+                            child.wait()
+                finally:
+                    # communicate() closes pipes on success, but not on timeout.
+                    # Close only Popen-owned pipes, never the caller's files.
+                    for pipe in (child.stdout, child.stderr):
+                        if pipe is not None:
+                            pipe.close()
 
 
 def safe_result(value, version, address):

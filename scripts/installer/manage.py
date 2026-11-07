@@ -3,7 +3,6 @@
 import argparse
 import contextlib
 import http.client
-import io
 import json
 import os
 from pathlib import Path
@@ -21,7 +20,13 @@ class Peer:
 
     def call(self, args, output=None):
         command = "python3 - " + " ".join(shlex.quote(str(x)) for x in args)
-        return self.ssh.execute(command, io.BytesIO(remote_source()), timeout=300, output_file=output)
+        # Popen(stdin=...) requires an OS file descriptor, not BytesIO. This
+        # private temporary file contains installer code only, never credentials.
+        # Keep it open through communicate(), then close on success or failure.
+        with tempfile.TemporaryFile(mode="w+b") as source:
+            source.write(remote_source())
+            source.seek(0)
+            return self.ssh.execute(command, source, timeout=300, output_file=output)
 
     def info(self):
         value = self.call(["--action", "info"])
