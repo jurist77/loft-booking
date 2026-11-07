@@ -195,6 +195,7 @@ class SafetyTests(unittest.TestCase):
         for mutate in (lambda d: d.update(ip4=d["ip4"].replace(":FORWARD DROP", ":FORWARD ACCEPT")),
                        lambda d: d.update(ip6=d["ip6"].replace("--dport 22", "--dport 443")),
                        lambda d: d["protected"].update({"/etc/default/ufw": b"changed".hex()}),
+                       lambda d: d.update(version4="iptables v1.8.10 (legacy)"),
                        lambda d: d.update(nft=d["nft"].replace('"prio": 0', '"prio": -10')),
                        lambda d: d.update(local4=False)):
             server = FakeHost(); server.after = mutate

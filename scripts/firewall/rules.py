@@ -202,6 +202,7 @@ def clean_nft(value):
 
 
 def expected_delta(before, after, backend):
+    if any(before[key] != after[key] for key in ("version4", "version6")): return False
     for family in (4, 6):
         name = "ip" + str(family)
         old, new = saved_tables(before[name]), saved_tables(after[name])
@@ -224,5 +225,5 @@ def expected_delta(before, after, backend):
                        {"match": {"op": "==", "left": {"payload": {"protocol": "tcp", "field": "dport"}}, "right": 3000}}, {"counter": None}, {"accept": None}]
             if any(expr not in allowed for expr in rule["expr"]) or allowed[1] not in rule["expr"] or allowed[3] not in rule["expr"]: return False
             del new[candidates[-1]]
-    legacy_same = all(saved_tables(before[key]) == saved_tables(after[key]) for key in ("legacy4", "legacy6")) if backend == "nft" else True
+    legacy_same = all(saved_tables(before[key]) == saved_tables(after[key]) for key in ("legacy4", "legacy6")) if backend == "nft" else all(saved_tables(after["legacy" + str(v)]) == saved_tables(after["ip" + str(v)]) for v in (4, 6))
     return old == new and legacy_same and before["protected"] == after["protected"]
