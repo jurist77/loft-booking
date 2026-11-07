@@ -112,7 +112,7 @@ def probable_cause(remote, external, address):
         own_listener = observed and complete and suitable and all(binding["owner"] == "studio" for binding in observed)
         return "EXTERNAL_HEALTHY" if service["read"] == "ok" and service["ActiveState"] == "active" and own_listener else "SERVICE_STATUS_DISAGREES"
     if service["read"] == "ok" and service["ActiveState"] in ("inactive", "failed"): return "SERVICE_NOT_ACTIVE"
-    if any(item["limited"] for item in remote["sockets"]): return "SOCKET_STATE_UNKNOWN"
+    if any(item["limited"] or item["read"] != "ok" for item in remote["sockets"]): return "SOCKET_STATE_UNKNOWN"
     all_bindings = [binding for item in remote["sockets"] for binding in item["bindings"]]
     bindings = [binding for binding in all_bindings if binding["port"] == PORT]
     if not bindings:

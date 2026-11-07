@@ -94,6 +94,7 @@ class DiagnosticTests(unittest.TestCase):
         self.assertEqual(runner.probable_cause(fixture(), OK, ADDRESS), "EXTERNAL_HEALTHY")
         incomplete = fixture(sockets6=("missing", ""))
         self.assertEqual(runner.probable_cause(incomplete, OK, ADDRESS), "SERVICE_STATUS_DISAGREES")
+        self.assertEqual(runner.probable_cause(incomplete, REFUSED, "2001:db8::1"), "SOCKET_STATE_UNKNOWN")
         self.assertEqual(runner.probable_cause(fixture(), REFUSED, ADDRESS), "HOST_OR_UPSTREAM_UNDETERMINED")
 
     def test_firewall_summaries_never_disclose_comments_addresses_or_chain_names(self):
