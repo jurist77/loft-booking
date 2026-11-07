@@ -1,0 +1,21 @@
+name: Check Studio network diagnostic
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  tests:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - name: Fixture-only read-only and redaction checks; never run real VPS diagnostics
+        run: PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s tests/diagnostics -v
