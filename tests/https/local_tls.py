@@ -28,6 +28,16 @@ def free_port():
     with socket.socket() as s:s.bind(('127.0.0.1',0));return s.getsockname()[1]
 
 
+def fixture_ports(config, tls, plain):
+    # Map the HTTP app's defaults as well as explicit listeners. Otherwise
+    # auto-HTTPS treats the high HTTP port as HTTPS and adds an implicit :80
+    # redirect listener, which a non-root GitHub runner cannot bind.
+    app=config['apps']['http'];app['http_port']=plain;app['https_port']=tls
+    app['servers']['studio_https']['listen']=[f'127.0.0.1:{tls}']
+    app['servers']['studio_http']['listen']=[f'127.0.0.1:{plain}']
+    return config
+
+
 def main():
     binary=Path(sys.argv[1]).resolve();children=[]
     with tempfile.TemporaryDirectory(prefix='studio-https-local-') as tmp:
@@ -37,17 +47,19 @@ def main():
              'API_PUBLIC_ORIGIN':origin,'API_TRUST_PROXY':'true','API_ALLOW_INSECURE_TEST_HTTP':'false','NEXT_TELEMETRY_DISABLED':'1'}
         setup="import{initializeDatabase,openDatabase}from'./src/server/database.ts';import{migrate}from'./src/server/migrations.ts';const s={path:process.env.SQLITE_PATH,busyTimeout:1000};initializeDatabase(s);const d=openDatabase(s);try{await migrate(d,'migrations/sqlite')}finally{d.close()}"
         subprocess.run(['node','--conditions=react-server','--input-type=module','-e',setup],cwd=ROOT,env=env,check=True,stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL,timeout=30)
-        config=internal(caddy_config(host,port),'90s');config['storage']['root']=str(root/'storage');config['admin']['listen']='unix/'+str(root/'admin.sock')
-        config['apps']['http']['servers']['studio_https']['listen']=[f'127.0.0.1:{tls}'];config['apps']['http']['servers']['studio_http']['listen']=[f'127.0.0.1:{plain}']
+        config=fixture_ports(internal(caddy_config(host,port),'90s'),tls,plain)
+        config['storage']['root']=str(root/'storage');config['admin']['listen']='unix/'+str(root/'admin.sock')
         cfg=root/'caddy.json';cfg.write_text(json.dumps(config))
+        logs=[(root/name).open('w+b') for name in ('next.log','caddy.log')]
         try:
-            children.append(subprocess.Popen(['node','node_modules/next/dist/bin/next','start','--hostname','127.0.0.1','--port',str(port)],cwd=ROOT,env=env,stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL,start_new_session=True))
-            children.append(subprocess.Popen([str(binary),'run','--config',str(cfg)],env={**os.environ,'XDG_DATA_HOME':str(root/'data'),'XDG_CONFIG_HOME':str(root/'config')},stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL,start_new_session=True))
+            children.append(subprocess.Popen(['node','node_modules/next/dist/bin/next','start','--hostname','127.0.0.1','--port',str(port)],cwd=ROOT,env=env,stdout=logs[0],stderr=logs[0],start_new_session=True))
+            children.append(subprocess.Popen([str(binary),'run','--config',str(cfg)],env={**os.environ,'XDG_DATA_HOME':str(root/'data'),'XDG_CONFIG_HOME':str(root/'config')},stdout=logs[1],stderr=logs[1],start_new_session=True))
             ca=root/'storage/pki/authorities/local/root.crt';ctx=None;first=None;end=time.monotonic()+30
             while time.monotonic()<end:
                 try:
                     ctx=ssl.create_default_context(cafile=str(ca));first=https_health(host,'127.0.0.1',minimum=20,context=ctx,port=tls);break
                 except (OSError,HttpsError):time.sleep(.2)
+                assert all(child.poll() is None for child in children),'LOCAL_FIXTURE_PROCESS_EXITED'
             assert first,'LOCAL_HTTPS_NOT_READY'
             body={'requestId':str(uuid.uuid4()),'resourceId':'studio-19-25','date':(dt.datetime.now(dt.timezone.utc)+dt.timedelta(days=2)).strftime('%Y-%m-%d'),
                   'start':'12:00','end':'13:00','firstName':'Тест','lastName':'Пример','phone':'+79000000000'}
@@ -71,12 +83,20 @@ def main():
                 if current['fingerprint']!=first['fingerprint']:rotated=True;break
             assert rotated,'AUTOMATIC_CERTIFICATE_ROTATION_NOT_OBSERVED'
             print('LOCAL_AUTO_RENEW_OK: pinned Caddy renewed a short-lived internal fixture certificate without service restart',flush=True)
+        except BaseException:
+            # Only newly-created synthetic fixtures, never installed service
+            # logs, secrets, production configuration or booking records.
+            for name,stream in zip(('NEXT','CADDY'),logs):
+                stream.flush();stream.seek(0,2);length=stream.tell();stream.seek(max(0,length-8000))
+                print('LOCAL_FIXTURE_'+name+'_DIAGNOSTIC\n'+stream.read().decode(errors='replace'),flush=True)
+            raise
         finally:
             for child in reversed(children):
                 if child.poll() is None:
                     os.killpg(child.pid,signal.SIGTERM)
                     try:child.wait(timeout=10)
                     except subprocess.TimeoutExpired:os.killpg(child.pid,signal.SIGKILL);child.wait()
+            for stream in logs:stream.close()
 
 
 def port_available(port):

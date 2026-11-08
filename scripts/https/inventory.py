@@ -9,12 +9,12 @@ import studio_installer as I
 from probe_studio_network import read_command, service_summary, ufw_summary
 from rules import empty_tables, saved_tables, Unsafe
 from bindings import listener_records, listener_ownership, studio_owns
-from configuration import SERVICE
+from configuration import SERVICE, UNIT_DIR
 from checks import require, HttpsError, acme_ready
 
 COMMANDS = {
-    "service": ("systemctl", "show", I.SERVICE, "--property=LoadState", "--property=ActiveState", "--property=SubState", "--property=MainPID"),
-    "caddy": ("systemctl", "show", SERVICE, "--property=LoadState", "--property=ActiveState", "--property=SubState", "--property=MainPID"),
+    "service": ("systemctl", "show", I.SERVICE, "--property=LoadState", "--property=ActiveState", "--property=SubState", "--property=MainPID", "--property=FragmentPath", "--property=DropInPaths"),
+    "caddy": ("systemctl", "show", SERVICE, "--property=LoadState", "--property=ActiveState", "--property=SubState", "--property=MainPID", "--property=FragmentPath", "--property=DropInPaths"),
     "sockets4": ("ss", "-H", "-O", "-4", "-lntpe", "sport", "=", ":3000"),
     "sockets6": ("ss", "-H", "-O", "-6", "-lntpe", "sport", "=", ":3000"),
     "web4": ("ss", "-H", "-O", "-4", "-lntpe", "( sport = :80 or sport = :443 )"),
@@ -71,6 +71,11 @@ def own_listeners(data, pid, port, readlink=os.readlink):
     return records
 
 
+def own_unit(raw, expected):
+    fields = dict(line.split("=", 1) for line in raw.splitlines() if "=" in line)
+    require(fields.get("FragmentPath") == str(expected) and fields.get("DropInPaths") == "", "UNIT_SHADOW_OR_DROPIN_REQUIRES_REVIEW")
+
+
 def snapshot(state, addresses, managed_tls=False, run=read, outbound=acme_ready, allow_stopped=False):
     I.host_facts(); account = I.managed_account(state)
     require(I.shutil.which("runuser", path="/usr/sbin:/usr/bin:/sbin:/bin"), "RUNUSER_REQUIRED")
@@ -87,6 +92,7 @@ def snapshot(state, addresses, managed_tls=False, run=read, outbound=acme_ready,
         data[name] = raw
     fingerprint = empty_firewall(data)
     service, pid = service_summary("ok", data["service"])
+    own_unit(data["service"], I.UNIT)
     require(service["ActiveState"] == "active" and service["SubState"] == "running", "STUDIO_NOT_ACTIVE")
     records = own_listeners({k: data[k] for k in ("sockets4", "sockets6")}, pid, state["port"])
     if I.https_settings(state): require(all(r["family"] == 4 and r["address"] == "127.0.0.1" for r in records), "HTTPS_BACKEND_NOT_LOOPBACK")
@@ -94,6 +100,7 @@ def snapshot(state, addresses, managed_tls=False, run=read, outbound=acme_ready,
     stopped = False
     if managed_tls:
         service, caddy_pid = service_summary("ok", data["caddy"])
+        own_unit(data["caddy"], UNIT_DIR / SERVICE)
         stopped = service["LoadState"] == "loaded" and service["ActiveState"] in ("inactive", "failed") and not data["web4"].strip() and not data["web6"].strip()
         if not (allow_stopped and stopped):
             require(service["ActiveState"] == "active", "MANAGED_CADDY_NOT_ACTIVE")

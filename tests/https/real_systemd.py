@@ -85,10 +85,12 @@ def main():
             status,raw=inventory.read(name,state['port']);assert status=='ok' or name=='caddy' and not managed
             selected[name]=raw
         _,pid=inventory.service_summary('ok',selected['service'])
+        inventory.own_unit(selected['service'],I.UNIT)
         rows=inventory.own_listeners({k:selected[k] for k in ('sockets4','sockets6')},pid,state['port'])
         if state.get('https'):assert all(row['family']==4 and row['address']=='127.0.0.1' for row in rows)
         stopped=False
         if managed:
+            inventory.own_unit(selected['caddy'],cfg.UNIT_DIR/cfg.SERVICE)
             svc,cpid=inventory.service_summary('ok',selected['caddy']);stopped=svc['ActiveState'] in ('failed','inactive')
             if not stopped:
                 for port in (80,443):inventory.own_listeners({f'sockets{f}':inventory.select_port(selected[f'web{f}'],port) for f in (4,6)},cpid,port)

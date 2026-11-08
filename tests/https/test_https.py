@@ -148,6 +148,17 @@ class HttpsTests(unittest.TestCase):
         for bad in ('/bin/caddy','/opt/studio1925-https/releases/../other/caddy'):
             with self.assertRaises(ValueError):cfg.service(bad)
 
+    def test_nonroot_rotation_fixture_maps_caddy_default_ports_without_altering_production(self):
+        from local_tls import fixture_ports
+        from fixture_config import internal
+        config=fixture_ports(internal(cfg.caddy_config(DOMAIN,3150)),44123,44124)
+        app=config['apps']['http']
+        self.assertEqual((app['http_port'],app['https_port']),(44124,44123))
+        self.assertEqual(app['servers']['studio_http']['listen'],['127.0.0.1:44124'])
+        self.assertEqual(app['servers']['studio_https']['listen'],['127.0.0.1:44123'])
+        production=cfg.caddy_config(DOMAIN,3000)['apps']['http']
+        self.assertNotIn('http_port',production);self.assertNotIn('https_port',production)
+
     def test_dns_exact_a_aaaa_caa_and_independent_resolver_agreement(self):
         import urllib.parse
         seen=[]
@@ -190,6 +201,13 @@ class HttpsTests(unittest.TestCase):
             for changed,link in ((row(port,124),'socket:[456]'),(row(port),'socket:[999]'),(row(port)+'\n'+row(port,124,457),'socket:[456]')):
                 with self.assertRaises(checks.HttpsError):inventory.own_listeners({'sockets4':'','sockets6':changed},123,port,lambda p:link)
         with self.assertRaises(Exception):inventory.own_listeners({'sockets4':'','sockets6':row(3000)},123,443,lambda p:'socket:[456]')
+
+    def test_pid_identity_alone_does_not_authorize_shadowed_units_or_dropins(self):
+        unit='/etc/systemd/system/studio1925.service'
+        inventory.own_unit('FragmentPath='+unit+'\nDropInPaths=\n',Path(unit))
+        for raw in ('MainPID=123\n','FragmentPath=/run/systemd/transient/studio1925.service\nDropInPaths=\n',
+                    'FragmentPath='+unit+'\nDropInPaths=/etc/systemd/system/studio1925.service.d/local.conf\n'):
+            with self.assertRaisesRegex(checks.HttpsError,'UNIT_SHADOW_OR_DROPIN'):inventory.own_unit(raw,Path(unit))
 
     def test_external_proof_rejects_certificate_disagreement_or_public_backend(self):
         verify=workflow.verifier({'hostname':DOMAIN,'addresses':[IP]},NONCE)
