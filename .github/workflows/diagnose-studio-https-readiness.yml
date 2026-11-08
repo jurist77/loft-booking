@@ -1,0 +1,52 @@
+name: Diagnose Studio HTTPS readiness
+
+on:
+  workflow_dispatch:
+    inputs:
+      server_ip:
+        description: "VPS IPv4/IPv6. READ ONLY: no TLS install, ports or service changes"
+        type: string
+        required: true
+
+permissions:
+  contents: read
+
+concurrency:
+  group: studio-https-readiness
+  cancel-in-progress: false
+
+jobs:
+  diagnose:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - name: Validate input and existing Secret before any network check
+        env:
+          STUDIO_PASSWORD_PRESENT: ${{ secrets.STUDIO_SSH_PASSWORD != '' }}
+        run: |
+          python3 - <<'PY'
+          import json,os,sys
+          sys.path.insert(0,'scripts/installer')
+          from deploy import server_ip,DeployError
+          try:
+              with open(os.environ['GITHUB_EVENT_PATH']) as event: inputs=json.load(event).get('inputs',{})
+              address=server_ip(inputs.get('server_ip',''))
+              print('::add-mask::'+address)
+              if os.environ.get('STUDIO_PASSWORD_PRESENT') != 'true': raise DeployError('STUDIO_SSH_PASSWORD_MISSING')
+          except DeployError as error:
+              print('FAILED: '+str(error));sys.exit(1)
+          PY
+      - name: SSH tooling on disposable runner only
+        run: |
+          if ! command -v sshpass >/dev/null; then
+            sudo apt-get update -qq
+            sudo apt-get install -y --no-install-recommends sshpass
+          fi
+      - name: Read-only readiness inventory and sanitized report
+        env:
+          STUDIO_SSH_PASSWORD: ${{ secrets.STUDIO_SSH_PASSWORD }}
+        run: PYTHONDONTWRITEBYTECODE=1 python3 scripts/diagnostics/https_readiness.py
