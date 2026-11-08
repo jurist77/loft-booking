@@ -21,7 +21,7 @@
 
 ## Проверки
 
-Локально: installer 65, HTTPS 23, прежние network/audit 38 и firewall 50 тестов; production Caddy JSON validation; настоящий TLS/API/SQLite COMMIT/idempotency/overlap/Origin и автоматическое продление короткоживущего CI-сертификата без restart. Также прошли 161 unit, 57 integration, HTTP health recovery, 18 API HTTP checks, 66 SERVER/DEMO browser scenarios, typecheck/lint, SERVER и Node/static DEMO builds и аудит экспорта без секретов. Актуальные результаты обязательных проверок: https://github.com/jurist77/loft-booking/pull/19/checks. Успех native TLS/systemd gate подтверждается только зелёным Installer CI; незавершённые/красные runs не являются приёмкой.
+Локально: installer 65, HTTPS 24, прежние network/audit 38 и firewall 50 тестов; production Caddy JSON validation; настоящий TLS/API/SQLite COMMIT/idempotency/overlap/Origin и автоматическое продление короткоживущего CI-сертификата без restart. Также прошли 161 unit, 57 integration, HTTP health recovery, 18 API HTTP checks, 66 SERVER/DEMO browser scenarios, typecheck/lint, SERVER и Node/static DEMO builds и аудит экспорта без секретов. Актуальные результаты обязательных проверок: https://github.com/jurist77/loft-booking/pull/19/checks. Успех native TLS/systemd gate подтверждается только зелёным Installer CI; незавершённые/красные runs не являются приёмкой.
 
 Обязательные CI x64/ARM64: существующие unit/integration/HTTP/Node build, реальное systemd обновление/rollback, браузерный путь из immutable release artifact; дополнительно настоящий HTTPS/browser SQLite flow, hard-crash recovery timer, update/restore HTTPS preservation и actual short-lived certificate renewal. Backend CI и DEMO CI остаются обязательными существующими проверками.
 
@@ -34,3 +34,5 @@
 [Пошаговая инструкция, риски, recovery и ограничения](../../managed-https.md).
 
 После merge владельцем и успешного main CI: проверить DuckDNS → Run check → принять отчёт → отдельно разрешить apply с точным подтверждением → проверить внешние TLS/GET API/backend closure → включить monitor variables и проверить доставку тестового failure notification. Реальные контакты/рабочие POST не используются для автоматической приёмки.
+
+Регрессионная проверка передачи порта: воспроизведён TIME_WAIT/EADDRINUSE после временной HTTP-проверки; SO_REUSEADDR позволяет Caddy занять освобождённый порт без ожидания и без SO_REUSEPORT. Десять последовательных реальных loopback handovers проходят; действующий listener по-прежнему блокирует bind. Также проверяется штатное отсутствие unit в systemd 255 без игнорирования ошибок инвентаризации.

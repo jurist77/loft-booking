@@ -324,6 +324,31 @@ class HttpsTests(unittest.TestCase):
                 checks.port_challenge('127.0.0.1',port,NONCE)
             self.assertTrue(checks.closed('127.0.0.1',port))
 
+    def test_probe_handover_does_not_wait_for_time_wait_or_take_an_active_listener(self):
+        original=socket.socket
+        class LocalSocket(original):
+            def bind(self,address):
+                return super().bind(('127.0.0.1',address[1]))
+        with patch.object(host.socket,'socket',LocalSocket):
+            for _ in range(10):
+                with host.PortProbe(NONCE,[],ports=(0,)) as probe:
+                    port=probe.servers[0].server_address[1]
+                    checks.port_challenge('127.0.0.1',port,NONCE)
+                    # Wait for server EOF before closing the client, forcing
+                    # server-side TIME_WAIT instead of relying on close timing.
+                    digest=hashlib.sha256((NONCE+':ports').encode()).hexdigest()
+                    with socket.create_connection(('127.0.0.1',port),timeout=2) as client:
+                        client.sendall(('GET /.well-known/studio-probe/'+digest+' HTTP/1.0\r\nHost: localhost\r\n\r\n').encode())
+                        received=b''
+                        while chunk:=client.recv(4096):received+=chunk
+                        self.assertIn(digest.encode(),received)
+                    with self.assertRaisesRegex(checks.HttpsError,'PORT_PROBE_BIND_FAILED'):
+                        with host.PortProbe(NONCE,[],ports=(port,)):self.fail('active listener seized')
+                with socket.socket() as successor:
+                    successor.setsockopt(socket.SOL_SOCKET,socket.SO_REUSEADDR,1)
+                    successor.bind(('127.0.0.1',port));successor.listen()
+                    self.assertEqual(successor.getsockopt(socket.SOL_SOCKET,socket.SO_REUSEPORT),0)
+
     def test_monitor_failure_and_notification_test_never_repairs_or_connects(self):
         with patch.dict(os.environ,{'GITHUB_REF':'refs/heads/main','STUDIO_TEST_NOTIFICATION':'true','GITHUB_STEP_SUMMARY':''}),patch.object(monitor,'check') as fn,contextlib.redirect_stdout(io.StringIO()) as log:
             self.assertEqual(monitor.main(),1);fn.assert_not_called();self.assertIn('NO_NETWORK',log.getvalue())

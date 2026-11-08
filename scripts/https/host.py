@@ -88,7 +88,10 @@ class PortProbe:
                 self.send_response(200 if body else 404); self.send_header("Content-Length", str(len(body))); self.end_headers(); self.wfile.write(body)
         class Server(http.server.ThreadingHTTPServer):
             daemon_threads = True
-            allow_reuse_address = False
+            # Permit the successor Caddy listener after our accepted HTTP
+            # sockets enter TIME_WAIT. SO_REUSEPORT is NEVER enabled: an
+            # active foreign listener still prevents this bind.
+            allow_reuse_address = True
             request_queue_size = 8
             def __init__(self, *args, **kwargs):
                 self.slots = threading.BoundedSemaphore(8)

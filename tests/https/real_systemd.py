@@ -153,6 +153,12 @@ def main():
             before=command(['systemctl','show',I.SERVICE,'-p','MainPID','--value']).stdout
             host.apply(options,archive,source,ops=ops,emit=emit,ack=ack)
             assert command(['systemctl','show',I.SERVICE,'-p','MainPID','--value']).stdout==before
+            # The real persisted watchdog must signal our deliberately short
+            # fixture certificate, without an email service or public request.
+            assert command(['systemctl','start',cfg.MONITOR_SERVICE],False).returncode!=0
+            alert=command(['journalctl','-u',cfg.MONITOR_SERVICE,'-n','10','--no-pager','-o','cat']).stdout
+            assert 'STUDIO_TLS_ATTENTION_CERTIFICATE_EXPIRING' in alert,'REAL_EXPIRY_SIGNAL_MISSING'
+            print('CI_REAL_EXPIRY_SIGNAL_OK',flush=True)
         hosts.write_text(hosts.read_text()+host_line)
         state=I.load_state();runtime=I.BASE/'releases'/state['current']/'root/usr/bin/node'
         env={**os.environ,'STUDIO_E2E_DB':str(data/'studio.sqlite'),'NODE_EXTRA_CA_CERTS':str(ca)}
