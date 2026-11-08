@@ -51,6 +51,8 @@ npm run dev:server
 
 POST требует точного `Origin`, JSON не более 4096 байт и стабильного UUID `requestId`. По умолчанию `API_PUBLIC_ORIGIN=http://127.0.0.1:3000`, `API_TRUST_PROXY=false`; общий лимит POST — 10 запросов в минуту. При другом адресе/порте изменить Origin в локальном env. Перед публичным запуском обязательна настройка proxy/HTTPS/лимитов: [контракт и защита](docs/booking-api-v2.3.md). Origin не заменяет авторизацию и не останавливает ботов, способных подставить заголовок.
 
+[HTTPS: read-only аудит и проект внедрения](docs/https-readiness.md) — ручной workflow **Diagnose Studio HTTPS readiness**, варианты DuckDNS/Let's Encrypt и IP-сертификатов, Origin/proxy/cutover/renew/rollback. Этот этап не устанавливает TLS и не открывает порты; сначала фактический аудит и отдельное согласование владельца.
+
 ## Проверки
 
 ```bash
