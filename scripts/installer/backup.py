@@ -10,6 +10,7 @@ import subprocess
 import tarfile
 import tempfile
 import time
+from transport_settings import https_settings
 
 MAX_ASSET = 1900 * 1024**2  # GitHub limit is strictly <2 GiB; keep a margin.
 TAG = re.compile(r"studio1925-(daily|preupdate)-([a-f0-9]{32})-(\d{8}T\d{6}Z)-([a-f0-9]{32})")
@@ -47,6 +48,8 @@ def validate_bundle(path, destination=None):
                 not archive.getmember("photos").isdir() or not archive.getmember("settings").isdir() or meta.size > 4 * 1024**2):
             raise BackupError("BUNDLE_METADATA_INVALID")
         manifest = json.load(archive.extractfile(meta))
+        try: https_settings(manifest)
+        except ValueError: raise BackupError("BUNDLE_METADATA_INVALID") from None
         if (manifest.get("format") != 2 or manifest.get("studio") != "studio1925" or
                 not re.fullmatch(r"[a-f0-9]{40}", str(manifest.get("version", ""))) or
                 not re.fullmatch(r"[a-f0-9]{64}", str(manifest.get("schema", ""))) or

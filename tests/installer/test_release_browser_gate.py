@@ -31,5 +31,17 @@ class ReleaseBrowserGateTests(unittest.TestCase):
         self.assertIn('"Check universal installer"', check)
         self.assertIn('"MAIN_CHECKS_NOT_SUCCESSFUL"', check)
 
+    def test_https_native_browser_and_recovery_gate_is_mandatory_before_publish(self):
+        text=(ROOT/'.github/workflows/installer-package.yml').read_text()
+        start=text.index('- name: Require real Caddy TLS')
+        publish=text.index('- name: Publish only the verified immutable package')
+        self.assertLess(start,publish)
+        self.assertIn('tests/https/real_systemd.py',text[start:publish])
+        self.assertIn('tests/https/local_tls.py',text[start:publish])
+        self.assertNotIn('continue-on-error',text[start:publish])
+        self.assertIn('github.workflow_sha',text)
+        restore=(ROOT/'.github/workflows/restore-studio.yml').read_text()
+        self.assertIn('Require successful current HTTPS-aware receiver checks',restore)
+
 
 if __name__ == "__main__": unittest.main()

@@ -116,7 +116,7 @@ class InstallerTests(unittest.TestCase):
         env = {"STUDIO_SERVER_IP": "203.0.113.9", "STUDIO_PASSWORD_PRESENT": "true", "GITHUB_SHA": VERSION,
                "GITHUB_REF": "refs/heads/main", "GITHUB_REPOSITORY": "owner/repo",
                "STUDIO_BACKUP_PASSWORD_PRESENT": "true", "STUDIO_BACKUP_TOKEN_PRESENT": "true", "STUDIO_BACKUP_REPOSITORY": "owner/private-backups"}
-        names = ("Check backend foundation", "Check read-only VPS audit tool", "Check universal installer")
+        names = ("Check backend foundation", "Check read-only VPS audit tool", "Check universal installer", "Check Studio HTTPS")
         runs = [{"name": name, "databaseId": i, "status": "completed", "conclusion": "success"} for i, name in enumerate(names)]
         def check(overrides, checks, expected):
             with patch.dict(os.environ, {**env, **overrides}), patch.object(gate.subprocess, "run", return_value=subprocess.CompletedProcess([], 0, json.dumps(checks))), contextlib.redirect_stdout(io.StringIO()):

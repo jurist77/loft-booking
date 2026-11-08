@@ -25,7 +25,7 @@ jobs:
           - arch: arm64
             runner: ubuntu-24.04-arm
     runs-on: ${{ matrix.runner }}
-    timeout-minutes: 30
+    timeout-minutes: 45
     env:
       NEXT_TELEMETRY_DISABLED: "1"
       PYTHONDONTWRITEBYTECODE: "1"
@@ -72,12 +72,48 @@ jobs:
           export STUDIO_E2E_RELEASE_ROOT="$browser_package"
           export CHROMIUM_PATH="$(node --input-type=module -e 'import { chromium } from "@playwright/test"; process.stdout.write(chromium.executablePath());')"
           npm run test:server:browser
+      - name: Checkout current reviewed lifecycle controls independently of selected app version
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: ${{ github.workflow_sha }}
+          path: .studio-verified-control
+          persist-credentials: false
+      - name: Use current controls for old-version restore acceptance; keep immutable app archive unchanged
+        run: |
+          python3 - <<'PY'
+          import pathlib,shutil
+          control=pathlib.Path('.studio-verified-control')
+          for name in ('scripts/installer','scripts/https','tests/installer','tests/https','e2e-https'):
+              shutil.copytree(control/name,pathlib.Path(name),dirs_exist_ok=True)
+          shutil.copyfile(control/'playwright.https.config.ts','playwright.https.config.ts')
+          PY
       # No real SSH connections in this PR: transport failures are mocked in
       # test_installer.py; the previous real_ssh.py is retained but not invoked.
       - name: Real systemd installation, updates, failures and schema-aware rollback on CI only
         env:
           STUDIO_SOURCE_SHA: ${{ inputs.source_sha }}
         run: sudo env STUDIO_INSTALLER_CI=1 GITHUB_ACTIONS=true python3 tests/installer/real_systemd.py --archive "$RUNNER_TEMP/server.tar.gz" --version "$STUDIO_SOURCE_SHA"
+      - name: Browser CA tooling on disposable CI runner only
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends libnss3-tools
+      - name: Require real Caddy TLS, browser SQLite flow, recovery timer and HTTPS-aware update/restore
+        env:
+          STUDIO_SOURCE_SHA: ${{ inputs.source_sha }}
+        run: |
+          export CHROMIUM_PATH="$(node --input-type=module -e 'import { chromium } from "@playwright/test"; process.stdout.write(chromium.executablePath());')"
+          sudo env STUDIO_INSTALLER_CI=1 GITHUB_ACTIONS=true PATH="$PATH" CHROMIUM_PATH="$CHROMIUM_PATH" python3 tests/https/real_systemd.py --archive "$RUNNER_TEMP/server.tar.gz" --version "$STUDIO_SOURCE_SHA"
+          python3 - <<'PY'
+          import sys,pathlib,platform,tarfile,tempfile,subprocess,os
+          sys.path.insert(0,'scripts/https')
+          from artifacts import download
+          with tempfile.TemporaryDirectory(prefix='studio-local-tls-') as folder:
+              root=pathlib.Path(folder)
+              archive=download({'x86_64':'x64','aarch64':'arm64'}[platform.machine()],root/'caddy.tar.gz')
+              with tarfile.open(archive) as source: (root/'caddy').write_bytes(source.extractfile('caddy').read())
+              os.chmod(root/'caddy',0o755)
+              subprocess.run([sys.executable,'tests/https/local_tls.py',str(root/'caddy')],check=True,timeout=210)
+          PY
       - name: Publish only the verified immutable package (never VPS data)
         if: inputs.publish_packages
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7

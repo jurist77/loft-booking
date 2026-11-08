@@ -12,6 +12,7 @@ import re
 import signal
 import subprocess
 import sys
+from transport_settings import https_settings, https_origin
 
 HERE = Path(__file__).resolve().parent
 SAFE_CODES = {
@@ -34,6 +35,7 @@ SAFE_CODES = {
     "INSTALLED_APPLICATION_REQUIRED", "SNAPSHOT_SQLITE_FAILED", "SNAPSHOT_TOO_LARGE", "TECHNICAL_ACCEPTANCE_FAILED",
     "PRODUCTION_API_UNAVAILABLE",
     "MAINTENANCE_SOURCE_ACTIVE",
+    "HTTPS_TRANSACTION_PENDING", "UNSAFE_HTTPS_STATE", "HTTPS_TARGET_REQUIRED_FOR_RESTORE",
 }
 ROLLBACKS = {"not-needed", "manual-required", "first-install-stopped", "restored-and-health-verified"}
 
@@ -190,24 +192,29 @@ class SSH:
                             pipe.close()
 
 
-def safe_result(value, version, address):
+def safe_result(value, version, address, expected_https=None):
     port = value.get("port")
     if type(port) is not int or not (port == 3000 or 3100 <= port <= 3199):
         raise DeployError("REMOTE_PROTOCOL_FAILED")
     parsed = ipaddress.ip_address(address)
     expected = f"http://{'[' + parsed.compressed + ']' if parsed.version == 6 else parsed.compressed}:{port}"
+    if expected_https:
+        expected = https_origin(expected_https)
+        if value.get("https") != expected_https: raise DeployError("REMOTE_PROTOCOL_FAILED")
     if (value.get("status") != "SUCCESS" or value.get("version") != version or value.get("url") != expected or
             value.get("health") != 200 or value.get("technical_acceptance") != "passed" or
             value.get("operation") not in ("install", "update", "restore", "already-current") or
             value.get("migrations") not in ("verified", "unchanged") or value.get("service") != "active-enabled"):
         raise DeployError("REMOTE_PROTOCOL_FAILED")
-    return {key: value[key] for key in ("status", "version", "url", "port", "operation", "migrations", "service", "health", "technical_acceptance")}
+    result = {key: value[key] for key in ("status", "version", "url", "port", "operation", "migrations", "service", "health", "technical_acceptance")}
+    if expected_https: result["https"] = expected_https
+    return result
 
 
 def remote_source():
     # Bundle reviewed support modules into one self-contained Python source. No
     # credential or user data is interpolated into code; payloads remain files.
-    modules = {name: (HERE / (name + ".py")).read_text() for name in ("backup", "maintenance")}
+    modules = {name: (HERE / (name + ".py")).read_text() for name in ("transport_settings", "backup", "maintenance")}
     prefix = "import sys,types\nfor _name,_code in " + repr(modules) + ".items():\n _module=types.ModuleType(_name);sys.modules[_name]=_module;exec(compile(_code,_name,'exec'),_module.__dict__)\n"
     return prefix.encode() + (HERE / "remote.py").read_bytes()
 

@@ -1,0 +1,70 @@
+name: Manage Studio HTTPS
+
+on:
+  workflow_dispatch:
+    inputs:
+      server_ip:
+        description: "Public VPS IPv4 or IPv6, SSH root:22"
+        type: string
+        required: true
+      hostname:
+        description: "Your registered hostname.duckdns.org; A/AAAA must already be correct"
+        type: string
+        required: true
+      additional_ip:
+        description: "Optional public address of the other family, required if published in DNS"
+        type: string
+        required: false
+      mode:
+        type: choice
+        options: [check, apply]
+        default: check
+        description: "check reads only; apply performs active port proof and managed cutover"
+      confirmation:
+        description: "For apply type exactly ENABLE STUDIO HTTPS"
+        type: string
+        required: false
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: studio-install-${{ inputs.server_ip }}
+  cancel-in-progress: false
+
+jobs:
+  https:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - name: Validate all inputs and exact apply confirmation before any SSH
+        env:
+          STUDIO_PASSWORD_PRESENT: ${{ secrets.STUDIO_SSH_PASSWORD != '' }}
+        run: |
+          python3 - <<'PY'
+          import json,os,sys
+          sys.path.insert(0,'scripts/https')
+          from configuration import inputs
+          try:
+              with open(os.environ['GITHUB_EVENT_PATH']) as event: value=inputs(json.load(event)['inputs'])
+              if os.environ.get('STUDIO_PASSWORD_PRESENT') != 'true': raise ValueError('STUDIO_SSH_PASSWORD_MISSING')
+              for item in [value['hostname'],*value['addresses']]: print('::add-mask::'+item)
+          except Exception:
+              print('FAILED: INPUT_OR_CONFIRMATION_OR_SECRET_INVALID');sys.exit(1)
+          PY
+      - name: SSH tooling on disposable runner only
+        run: |
+          if ! command -v sshpass >/dev/null; then
+            sudo apt-get update -qq
+            sudo apt-get install -y --no-install-recommends sshpass
+          fi
+      - name: Verified main, public DNS, read-only admission and explicit optional apply
+        env:
+          GH_TOKEN: ${{ github.token }}
+          STUDIO_SSH_PASSWORD: ${{ secrets.STUDIO_SSH_PASSWORD }}
+        run: PYTHONDONTWRITEBYTECODE=1 python3 scripts/https/workflow.py
