@@ -10,6 +10,9 @@ const db = new Database(path); db.pragma("foreign_keys=ON");
 const submit = (page: import("@playwright/test").Page) => page.getByRole("button", { name: "Подтвердить выбор", exact: true });
 test.beforeEach(async ({ page }) => {
   db.transaction(() => db.exec("DELETE FROM booking_events; DELETE FROM bookings;"))();
+  // Independent disposable CI cases restart rapidly to reset the API budget.
+  // Clear the fixture's start counter, retaining production unit limits.
+  execFileSync("systemctl", ["reset-failed", "studio1925.service"], { stdio: "ignore", timeout: 15000 });
   execFileSync("systemctl", ["restart", "studio1925.service"], { stdio: "ignore", timeout: 45000 });
   await expect.poll(async () => {
     try { return (await page.request.get("/api/health")).status(); } catch { return 0; }
