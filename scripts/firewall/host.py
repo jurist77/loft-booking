@@ -13,8 +13,9 @@ import sys
 
 if "COMMANDS" not in globals():  # Normal imports in fixture tests; payload embeds these.
     sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "diagnostics"))
-    from probe_studio_network import COMMANDS, LIMIT, read_command, read_health, service_summary, socket_summary, ufw_summary, deadline
+    from probe_studio_network import COMMANDS, LIMIT, read_command, read_health, service_summary, ufw_summary, deadline
     from rules import Unsafe, saved_tables, empty_tables, ip_rule, ip_profile, nft_profile, clean_nft, expected_delta
+    from bindings import listener_records, listener_ownership, studio_owns, bind_proof
     import json
     import re
 
@@ -37,6 +38,8 @@ PROTECTED = ("/etc/default/ufw", "/etc/ufw/ufw.conf", "/etc/ufw/before.rules", "
              "/etc/ufw/before6.rules", "/etc/ufw/after6.rules", "/etc/ufw/sysctl.conf")
 HOST_COMMANDS = {
     **COMMANDS,
+    "sockets4": ("ss", "-H", "-O", "-4", "-lntpe", "sport", "=", ":3000"),
+    "sockets6": ("ss", "-H", "-O", "-6", "-lntpe", "sport", "=", ":3000"),
     "ip4": ("iptables-save",), "ip6": ("ip6tables-save",),
     "legacy4": ("iptables-legacy-save",), "legacy6": ("ip6tables-legacy-save",),
     "version4": ("iptables", "--version"), "version6": ("ip6tables", "--version"),
@@ -112,7 +115,7 @@ def read_host(name):
     return reader(name)
 
 
-def snapshot(read=read_host, files=bounded_file, health=read_health):
+def snapshot(read=read_host, files=bounded_file, health=read_health, readlink=os.readlink):
     result = {}
     for name in ("service", "sockets4", "sockets6", "ufw", "nft", "ip4", "ip6", "legacy4", "legacy6", "version4", "version6"):
         state, raw = read(name)
@@ -121,25 +124,31 @@ def snapshot(read=read_host, files=bounded_file, health=read_health):
     result["protected"] = {name: files(name).hex() for name in PROTECTED}
     result["user4"] = files("/etc/ufw/user.rules").decode()
     result["user6"] = files("/etc/ufw/user6.rules").decode()
+    service, pid = service_summary("ok", result["service"])
+    records = listener_records(result)
+    result["listener_ownership"] = listener_ownership(result, pid, readlink)
     result["local4"] = health("127.0.0.1")["ok"]
     result["local6"] = health("::1")["ok"]
+    # Health must not bridge a process/socket replacement. Queues/counters are
+    # volatile; compare PID/state and exact socket identities/options instead.
+    fresh = {}
+    for name in ("service", "sockets4", "sockets6"):
+        state, raw = read(name)
+        if state != "ok": raise Unsafe("READS_INCOMPLETE")
+        fresh[name] = raw
+    if service_summary("ok", fresh["service"]) != (service, pid) or listener_records(fresh) != records or listener_ownership(fresh, pid, readlink) != result["listener_ownership"]: raise Unsafe("LISTENER_STATE_CHANGED")
     return result  # Private memory only, never returned over SSH or logged.
 
 
 def studio_ok(data, family):
     service, pid = service_summary("ok", data["service"])
     if not pid or service["LoadState"] != "loaded" or service["ActiveState"] != "active" or service["SubState"] != "running": raise Unsafe("STUDIO_NOT_ACTIVE")
-    bindings = []
-    for version in (4, 6):
-        sockets = socket_summary("ok", data["sockets" + str(version)], version, pid)
-        if sockets["limited"]: raise Unsafe("READS_INCOMPLETE")
-        bindings += [b for b in sockets["bindings"] if b["port"] == 3000]
-    if not bindings or any(b["owner"] != "studio" or b["scoped"] for b in bindings): raise Unsafe("PORT_NOT_EXCLUSIVELY_STUDIO")
-    for version in (4, 6):
-        for line in data["sockets" + str(version)].splitlines():
-            if re.search(r":3000\s", line) and set(re.findall(r"\bpid=(\d+)", line)) != {str(pid)}: raise Unsafe("PORT_NOT_EXCLUSIVELY_STUDIO")
-    if not any(b["kind"] == "wildcard" and b["family"] == family for b in bindings): raise Unsafe("PUBLIC_BIND_NOT_CONFIRMED")
-    if not data["local" + str(family)]: raise Unsafe("LOCAL_HEALTH_FAILED")
+    records = listener_records(data)
+    if not studio_owns(records, data, pid): raise Unsafe("PORT_NOT_EXCLUSIVELY_STUDIO")
+    proof = bind_proof(records, family)
+    if proof == "unconfirmed": raise Unsafe("PUBLIC_BIND_NOT_CONFIRMED")
+    if not data["local" + str(family)] or (proof == "ipv4_dual_stack" and not data["local6"]): raise Unsafe("LOCAL_HEALTH_FAILED")
+    return proof
 
 
 def backend_of(data):
@@ -167,9 +176,10 @@ def state_fingerprint(data):
     stable = {name: saved_tables(data[name]) for name in ("ip4", "ip6", "legacy4", "legacy6")}
     stable["nft"] = [clean_nft(v) for v in json.loads(data["nft"])["nftables"] if "metainfo" not in v]
     for name in ("protected", "version4", "version6", "service", "ufw", "local4", "local6"): stable[name] = data[name]
+    stable["listeners"] = listener_records(data)
+    stable["listener_ownership"] = data["listener_ownership"]
     for family in (4, 6):
         stable["user" + str(family)] = persistent_rules(data["user" + str(family)])
-        stable["sockets" + str(family)] = socket_summary("ok", data["sockets" + str(family)], family, service_summary("ok", data["service"])[1])
     return hashlib.sha256(json.dumps(stable, sort_keys=True).encode()).hexdigest()
 
 
@@ -235,10 +245,12 @@ def operate(mode, confirmation, family, take=snapshot, write=None, implementatio
     try:
         before = take()
         service, pid = service_summary("ok", before["service"])
-        bindings = [b for v in (4, 6) for b in socket_summary("ok", before["sockets" + str(v)], v, pid)["bindings"] if b["port"] == 3000]
+        records = listener_records(before)
+        owned = studio_owns(records, before, pid)
+        proof = bind_proof(records, family) if owned else "unconfirmed"
         ufw = ufw_summary("ok", before["ufw"])
-        observations = {"studio_active": service["ActiveState"] == "active", "port_owned_by_studio": bool(bindings) and all(b["owner"] == "studio" for b in bindings),
-                        "public_bind": any(b["kind"] == "wildcard" and b["family"] == family for b in bindings),
+        observations = {"studio_active": service["ActiveState"] == "active", "port_owned_by_studio": owned,
+                        "public_bind": proof != "unconfirmed", "bind_proof": proof,
                         "local_health": before["local" + str(family)], "ufw": ufw["active"], "incoming": ufw["default_incoming"],
                         "allow3000": ufw["port3000"]["accept"], "deny3000": ufw["port3000"]["drop"] + ufw["port3000"]["reject"], "path_and_method_proven": False}
         studio_ok(before, family)

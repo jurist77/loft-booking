@@ -17,7 +17,7 @@ from studio_network import health_valid, ProtocolError, SSH_ERRORS
 
 CONFIRMATION = "ENABLE STUDIO TCP 3000"
 STATUSES = ("READY_TO_APPLY", "ALREADY_ACCESSIBLE", "BLOCKED_FOR_SAFETY", "INCONCLUSIVE", "NO_CHANGE_REQUIRED", "FAILED_NO_CHANGE", "MANUAL_REVIEW_REQUIRED", "APPLIED_PENDING_EXTERNAL")
-REASONS = ("CONFIRMATION_REQUIRED", "EXTERNAL_HEALTH_CONFIRMED", "PATH_AND_APPEND_PROVEN", "STATE_CHANGED_SINCE_CHECK", "UNEXPECTED_FIREWALL_DELTA", "ONLY_TCP_3000_ALLOW_ADDED", "OPERATION_NOT_CONFIRMED", "LOCK_OR_ROOT_UNAVAILABLE", "STUDIO_NOT_ACTIVE", "READS_INCOMPLETE", "PORT_NOT_EXCLUSIVELY_STUDIO", "PUBLIC_BIND_NOT_CONFIRMED", "LOCAL_HEALTH_FAILED", "UFW_NOT_ACTIVE", "POLICY_NOT_SUPPORTED", "EXISTING_OR_CONFLICTING_3000_RULE", "UNSUPPORTED_UFW_DEFAULTS", "UNSUPPORTED_UFW_IMPLEMENTATION", "UNSUPPORTED_HOST", "MIXED_OR_UNKNOWN_BACKEND", "OTHER_FILTERING_BACKEND", "ADDITIONAL_FILTERING", "FOREIGN_CHAINS", "UFW_RELOAD_WOULD_BE_REQUIRED", "PERSISTED_RULES_DIFFER", "ADDITIONAL_NFT_FILTERING", "PATH_NOT_PROVEN", "UFW_ADD_FAILED", "UNEXPECTED_UFW_COMMAND")
+REASONS = ("CONFIRMATION_REQUIRED", "EXTERNAL_HEALTH_CONFIRMED", "PATH_AND_APPEND_PROVEN", "STATE_CHANGED_SINCE_CHECK", "UNEXPECTED_FIREWALL_DELTA", "ONLY_TCP_3000_ALLOW_ADDED", "OPERATION_NOT_CONFIRMED", "LOCK_OR_ROOT_UNAVAILABLE", "STUDIO_NOT_ACTIVE", "READS_INCOMPLETE", "PORT_NOT_EXCLUSIVELY_STUDIO", "PUBLIC_BIND_NOT_CONFIRMED", "LISTENER_STATE_CHANGED", "LOCAL_HEALTH_FAILED", "UFW_NOT_ACTIVE", "POLICY_NOT_SUPPORTED", "EXISTING_OR_CONFLICTING_3000_RULE", "UNSUPPORTED_UFW_DEFAULTS", "UNSUPPORTED_UFW_IMPLEMENTATION", "UNSUPPORTED_HOST", "MIXED_OR_UNKNOWN_BACKEND", "OTHER_FILTERING_BACKEND", "ADDITIONAL_FILTERING", "FOREIGN_CHAINS", "UFW_RELOAD_WOULD_BE_REQUIRED", "PERSISTED_RULES_DIFFER", "ADDITIONAL_NFT_FILTERING", "PATH_NOT_PROVEN", "UFW_ADD_FAILED", "UNEXPECTED_UFW_COMMAND")
 
 
 def validate(value):
@@ -34,7 +34,9 @@ def validate(value):
     if "observations" in value:
         obs = value["observations"]
         flags = ("studio_active", "port_owned_by_studio", "public_bind", "local_health", "path_and_method_proven")
-        if not isinstance(obs, dict) or set(obs) != {*flags, "ufw", "incoming", "allow3000", "deny3000"}: raise ProtocolError()
+        if not isinstance(obs, dict) or set(obs) != {*flags, "ufw", "incoming", "allow3000", "deny3000", "bind_proof"}: raise ProtocolError()
+        if obs["bind_proof"] not in ("native_ipv4", "native_ipv6", "ipv4_dual_stack", "unconfirmed") or obs["public_bind"] != (obs["bind_proof"] != "unconfirmed"): raise ProtocolError()
+        if obs["public_bind"] and obs["port_owned_by_studio"] is not True: raise ProtocolError()
         if any(type(obs[key]) is not bool for key in flags): raise ProtocolError()
         if obs["ufw"] not in ("active", "inactive", "unknown") or obs["incoming"] not in ("allow", "deny", "reject", "unknown"): raise ProtocolError()
         if any(type(obs[key]) is not int or not 0 <= obs[key] <= 100000 for key in ("allow3000", "deny3000")): raise ProtocolError()
@@ -45,7 +47,7 @@ def payload(options):
     # No remote files/modules or host Python site customization. Dependencies
     # are embedded from this checkout; all inputs are JSON data, never code.
     probe = (ROOT / "diagnostics/probe_studio_network.py").read_text().split('\nif __name__ == "__main__":')[0]
-    source = probe + "\n" + Path(__file__).with_name("rules.py").read_text() + "\n" + Path(__file__).with_name("host.py").read_text()
+    source = probe + "\n" + Path(__file__).with_name("rules.py").read_text() + "\n" + Path(__file__).with_name("bindings.py").read_text() + "\n" + Path(__file__).with_name("host.py").read_text()
     source += "\nCOMMANDS = HOST_COMMANDS\n"
     source += "\nprint(json.dumps(remote_main(json.loads(" + repr(json.dumps(options)) + "))))\n"
     return source.encode()

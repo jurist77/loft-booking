@@ -23,8 +23,9 @@ TIMEOUT = {"http": None, "ok": False, "error": "timeout"}
 
 def fixture():
     data = {"service": "LoadState=loaded\nActiveState=active\nSubState=running\nMainPID=4321\n",
-            "sockets4": 'LISTEN 0 511 0.0.0.0:3000 0.0.0.0:* users:(("node",pid=4321,fd=4))',
-            "sockets6": 'LISTEN 0 511 [::]:3000 [::]:* users:(("node",pid=4321,fd=4))',
+            "sockets4": 'LISTEN 0 511 0.0.0.0:3000 0.0.0.0:* users:(("node",pid=4321,fd=4)) ino:1004 sk:a004',
+            "sockets6": 'LISTEN 0 511 [::]:3000 [::]:* users:(("node",pid=4321,fd=5)) ino:1006 sk:a006 v6only:1',
+            "listener_ownership": {"4321:4:1004": True, "4321:5:1006": True},
             "ufw": "Status: active\nDefault: deny (incoming), allow (outgoing), deny (routed)\n22/tcp ALLOW IN Anywhere\n",
             "protected": {name: b"fixture-only".hex() for name in host.PROTECTED},
             "local4": True, "local6": True, "version4": "iptables v1.8.10 (nf_tables)", "version6": "ip6tables v1.8.10 (nf_tables)",
@@ -268,7 +269,7 @@ class BoundaryTests(unittest.TestCase):
         self.assertEqual(host.ALLOW, ["/usr/sbin/ufw", "allow", "in", "proto", "tcp", "from", "any", "to", "any", "port", "3000"])
         for argv in host.HOST_COMMANDS.values():
             for bad in ("restart", "reload", "enable", "disable", "delete", "insert", "-A", "-F", "-X", "-P", "-I", "-D"): self.assertNotIn(bad, argv)
-        source = (ROOT / "scripts/firewall/host.py").read_text()
+        source = (ROOT / "scripts/firewall/host.py").read_text() + (ROOT / "scripts/firewall/bindings.py").read_text()
         for bad in ("shell=True", "os.system", "ufw-init", "systemctl restart", "nft add", "iptables-restore", "write_text", "write_bytes", "vpn_automatic", "xray", "3x-ui"): self.assertNotIn(bad, source.lower())
 
     def test_workflow_manual_main_only_no_new_secret_or_injection(self):
