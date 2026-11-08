@@ -21,7 +21,7 @@
 
 ## Проверки
 
-Локально: installer 65, HTTPS 26, прежние network/audit 38 и firewall 50 тестов; production Caddy JSON validation; настоящий TLS/API/SQLite COMMIT/idempotency/overlap/Origin и автоматическое продление короткоживущего CI-сертификата без restart. Также прошли 161 unit, 57 integration, HTTP health recovery, 18 API HTTP checks, 66 SERVER/DEMO browser scenarios, typecheck/lint, SERVER и Node/static DEMO builds и аудит экспорта без секретов. Актуальные результаты обязательных проверок: https://github.com/jurist77/loft-booking/pull/19/checks. Успех native TLS/systemd gate подтверждается только зелёным Installer CI; незавершённые/красные runs не являются приёмкой.
+Локально: installer 65, HTTPS 27, прежние network/audit 38 и firewall 50 тестов; production Caddy JSON validation; настоящий TLS/API/SQLite COMMIT/idempotency/overlap/Origin и автоматическое продление короткоживущего CI-сертификата без restart. Также прошли 161 unit, 57 integration, HTTP health recovery, 18 API HTTP checks, 66 SERVER/DEMO browser scenarios, typecheck/lint, SERVER и Node/static DEMO builds и аудит экспорта без секретов. Актуальные результаты обязательных проверок: https://github.com/jurist77/loft-booking/pull/19/checks. Успех native TLS/systemd gate подтверждается только зелёным Installer CI; незавершённые/красные runs не являются приёмкой.
 
 Обязательные CI x64/ARM64: существующие unit/integration/HTTP/Node build, реальное systemd обновление/rollback, браузерный путь из immutable release artifact; дополнительно настоящий HTTPS/browser SQLite flow, hard-crash recovery timer, update/restore HTTPS preservation и actual short-lived certificate renewal. Backend CI и DEMO CI остаются обязательными существующими проверками.
 
@@ -38,3 +38,5 @@
 Регрессионная проверка передачи порта: воспроизведён TIME_WAIT/EADDRINUSE после временной HTTP-проверки; SO_REUSEADDR позволяет Caddy занять освобождённый порт без ожидания и без SO_REUSEPORT. Десять последовательных реальных loopback handovers проходят; действующий listener по-прежнему блокирует bind. Также проверяется штатное отсутствие unit в systemd 255 без игнорирования ошибок инвентаризации.
 
 Отдельная non-root проверка renew использует высокие loopback-порты с явными `http_port`/`https_port`: без этого Caddy добавлял неявный redirect listener на 80. Production конфигурация 80/443 не меняется. Реальные systemd/TLS, все восемь browser checks, update/restore и expiry signal уже прошли на обеих архитектурах; окончательный combined gate требует также успешного native renew и прежних installer checks.
+
+Runner отклоняет преждевременный SUCCESS и переставленные/пропущенные этапы SSH-протокола: внешние проверки портов → сертификата → cutover обязательны до подтверждения установки. Для уже включённого HTTPS обязательно отдельное внешнее verify-existing. Регрессионные проверки используют настоящий subprocess/pipe.

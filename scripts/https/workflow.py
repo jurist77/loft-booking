@@ -97,6 +97,9 @@ class Session:
         return value
 
     def run(self, options, archive=b"", verify=None):
+        require(options.get("mode") in ("check", "apply"), "INVALID_REMOTE_PROTOCOL")
+        history = []
+        cutover = ["ports-probe", "certificate-ready", "cutover-ready"]
         code = source(); packet = json.dumps({"code_size": len(code), "archive_size": len(archive), "options": options}).encode()+b"\n"+code+archive
         try:
             self.child = subprocess.Popen(self.ssh.arguments("python3 -I -B -S -c " + shlex.quote(BOOTSTRAP)),
@@ -117,6 +120,11 @@ class Session:
                     if status == "FAILED":
                         code = event.get("code", "")
                         raise HttpsError(code if type(code) is str and code in SAFE_REMOTE_CODES else "REMOTE_HTTPS_FAILED")
+                    if status == "SUCCESS":
+                        required = cutover if event.get("operation") == "https-enabled" else ["verify-existing"]
+                        require(options["mode"] == "apply" and history == required, "EXTERNAL_PROOF_SEQUENCE_REQUIRED")
+                    else:
+                        require(options["mode"] == "check" and not history, "INVALID_REMOTE_PROTOCOL")
                     if status == "CHECK_EXISTING_HTTPS": verify("verify-existing", event)
                     require(event.get("operation") in (None, "already-https", "https-enabled", "https-service-recovered") and event.get("changes") in ("none", "studio-tls-only") and event.get("arch") in (None, "x64", "arm64"), "INVALID_REMOTE_PROTOCOL")
                     require(status == "SUCCESS" or event.get("arch") in ("x64", "arm64"), "INVALID_REMOTE_PROTOCOL")
@@ -125,8 +133,12 @@ class Session:
                     return {"status": status, "arch": event.get("arch"), "operation": event.get("operation"), "changes": event.get("changes", "none")}
                 expected = {"event"} if phase == "ports-probe" else {"event", "fingerprint", "port"}
                 require(set(event) == expected, "INVALID_REMOTE_PROTOCOL")
+                require(options["mode"] == "apply" and (
+                    history == cutover[:len(history)] and len(history) < len(cutover) and phase == cutover[len(history)] or
+                    not history and phase == "verify-existing"), "EXTERNAL_PROOF_SEQUENCE_REQUIRED")
                 verify(phase, event)
                 self.write(json.dumps({"phase": phase, "nonce": options["nonce"], "ok": True}).encode()+b"\n", timeout=10)
+                history.append(phase)
                 print("VERIFIED_" + phase.replace("-", "_").upper(), flush=True)
         except (OSError, ValueError, subprocess.SubprocessError):
             raise HttpsError("SSH_TRANSPORT_FAILED_OUTCOME_UNKNOWN") from None

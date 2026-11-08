@@ -386,8 +386,11 @@ header=json.loads(sys.stdin.buffer.readline())
 code=sys.stdin.buffer.read(header['code_size']);archive=sys.stdin.buffer.read(header['archive_size'])
 assert b'SYNTHETIC_PASSWORD_PII_PRIVATE_KEY_NEVER_LOG' not in code
 assert header['options']['nonce']=='f'*64
-print(json.dumps({'event':'ports-probe'}),flush=True)
-ack=json.loads(sys.stdin.buffer.readline());assert ack['phase']=='ports-probe' and ack['ok'] is True
+for phase in ('ports-probe','certificate-ready','cutover-ready'):
+    event={'event':phase}
+    if phase!='ports-probe':event.update(fingerprint='b'*64,port=3000)
+    print(json.dumps(event),flush=True)
+    ack=json.loads(sys.stdin.buffer.readline());assert ack['phase']==phase and ack['ok'] is True
 print(json.dumps({'event':'result','status':'SUCCESS','operation':'https-enabled','changes':'studio-tls-only'}),flush=True)
 '''
 
@@ -400,8 +403,8 @@ class SessionTests(unittest.TestCase):
             def arguments(self,command):commands.append(command);return [sys.executable,'-c',RECEIVER]
         events=[]
         with contextlib.redirect_stdout(io.StringIO()) as log:
-            result=workflow.Session(SSH()).run({'nonce':NONCE},b'public-artifact',lambda phase,event:events.append(phase))
-        self.assertEqual(result['status'],'SUCCESS');self.assertEqual(events,['ports-probe'])
+            result=workflow.Session(SSH()).run({'nonce':NONCE,'mode':'apply'},b'public-artifact',lambda phase,event:events.append(phase))
+        self.assertEqual(result['status'],'SUCCESS');self.assertEqual(events,['ports-probe','certificate-ready','cutover-ready'])
         self.assertNotIn(CANARY,log.getvalue()+' '.join(commands))
     def test_auth_failure_malicious_protocol_and_transport_cleanup(self):
         for body,code in (("raise SystemExit(5)",'SSH_AUTH_FAILED'),("print('not json')",'INVALID_REMOTE_PROTOCOL'),("print('{\"event\":\"result\",\"status\":\"FAILED\",\"code\":\"SYNTHETIC_PASSWORD_PII_PRIVATE_KEY_NEVER_LOG\"}')",'REMOTE_HTTPS_FAILED')):
@@ -409,8 +412,20 @@ class SessionTests(unittest.TestCase):
                 password=CANARY
                 def arguments(self,command):return [sys.executable,'-c',"import sys,json;h=json.loads(sys.stdin.buffer.readline());sys.stdin.buffer.read(h['code_size']+h['archive_size']);"+body]
             session=workflow.Session(SSH())
-            with self.assertRaisesRegex(checks.HttpsError,code):session.run({'nonce':NONCE})
+            with self.assertRaisesRegex(checks.HttpsError,code):session.run({'nonce':NONCE,'mode':'check'})
             self.assertIsNotNone(session.child.poll());self.assertTrue(session.child.stdin.closed);self.assertTrue(session.child.stdout.closed)
+
+    def test_remote_success_or_out_of_order_phase_cannot_skip_external_tls_proof(self):
+        for event in ({'event':'result','status':'SUCCESS','operation':'https-enabled','changes':'studio-tls-only'},
+                      {'event':'cutover-ready','fingerprint':'b'*64,'port':3000}):
+            body='import sys,json;h=json.loads(sys.stdin.buffer.readline());sys.stdin.buffer.read(h["code_size"]+h["archive_size"]);print('+repr(json.dumps(event))+',flush=True)'
+            class SSH:
+                password=CANARY
+                def arguments(self,command):return [sys.executable,'-c',body]
+            verified=Mock();session=workflow.Session(SSH())
+            with self.assertRaisesRegex(checks.HttpsError,'EXTERNAL_PROOF_SEQUENCE_REQUIRED'):
+                session.run({'nonce':NONCE,'mode':'apply'},verify=verified)
+            verified.assert_not_called();self.assertIsNotNone(session.child.poll())
 
 
 if __name__=='__main__':unittest.main()
