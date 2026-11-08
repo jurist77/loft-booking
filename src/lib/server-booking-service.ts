@@ -3,6 +3,7 @@ import { BookingClientError, type BookingRequest, type BookingService, type Serv
 import { DEPLOYMENT } from "./deployment";
 import { STUDIO } from "./studio";
 import { validateContact } from "./validation";
+import { createRequestId } from "./request-id";
 
 const UNKNOWN = "Результат бронирования не удалось подтвердить. Заявка могла сохраниться. Повторите отправку: будет использован тот же номер заявки.";
 const resourceIdDefault = "studio-19-25";
@@ -16,7 +17,7 @@ const minutes = (value: unknown): number | null => typeof value === "string" && 
 const object = (value: unknown): Record<string, unknown> => value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : {};
 
 /** Same-origin HTTP client. No server imports, browser storage, logging or automatic retries. */
-export function createServerService({ resourceId = resourceIdDefault, basePath = DEPLOYMENT.basePath, fetcher = fetch, uuid = () => crypto.randomUUID(), timeoutMs = 10000 }: Options = {}): BookingService<ServerConfirmation> {
+export function createServerService({ resourceId = resourceIdDefault, basePath = DEPLOYMENT.basePath, fetcher = fetch, uuid = createRequestId, timeoutMs = 10000 }: Options = {}): BookingService<ServerConfirmation> {
   if (basePath && !/^\/[a-zA-Z0-9_-]+(?:\/[a-zA-Z0-9_-]+)*$/.test(basePath)) throw new Error("Invalid local API path");
   let attempt: { key: string; id: string; unknown: boolean; changeAllowed: boolean } | null = null;
   let sending = false; let postRetryAt = 0; let getRetryAt = 0;
@@ -64,7 +65,12 @@ export function createServerService({ resourceId = resourceIdDefault, basePath =
       if (sending) throw new BookingClientError("unknown", "Заявка уже отправляется. Дождитесь ответа.", 0, true);
       if (Date.now() < postRetryAt) throw new BookingClientError("limited", "Слишком много запросов. Подождите перед повторной отправкой.", postRetryAt, attempt?.unknown);
       if (attempt?.unknown && attempt.key !== key && !attempt.changeAllowed) throw new BookingClientError("unknown", UNKNOWN, 0, true);
-      if (!attempt || attempt.key !== key) attempt = { key, id: uuid(), unknown: false, changeAllowed: false };
+      if (!attempt || attempt.key !== key) {
+        let id: string;
+        try { id = uuid(); }
+        catch { throw new BookingClientError("input", "Не удалось подготовить номер заявки. Новая отправка не выполнялась. Обновите браузер или свяжитесь с администратором.", 0, attempt?.unknown); }
+        attempt = { key, id, unknown: false, changeAllowed: false };
+      }
       const current = attempt; sending = true;
       try {
         const { response, data } = await http("bookings", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ requestId: current.id, ...body }) });

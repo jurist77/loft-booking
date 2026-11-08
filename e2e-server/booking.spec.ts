@@ -27,6 +27,10 @@ test.beforeEach(async ({ page, context }, info) => {
   const hash = createHash("sha256").update(info.testId + info.project.name).digest("hex");
   await context.setExtraHTTPHeaders({ "x-studio-client-ip": `2001:db8:${hash.slice(0, 4)}:${hash.slice(4, 8)}::1` });
   observe(page); await page.goto("./");
+  const capabilities = await page.evaluate(() => ({ secure: isSecureContext, uuid: typeof crypto.randomUUID, random: typeof crypto.getRandomValues }));
+  expect(capabilities).toEqual(process.env.STUDIO_E2E_ORIGIN_KIND === "insecure-http"
+    ? { secure: false, uuid: "undefined", random: "function" }
+    : { secure: true, uuid: "function", random: "function" });
 });
 test.afterEach(() => {
   for (const value of ["Тест", "Пример", "79000000000", "9000000000", "UNHANDLED_PAGE_ERROR"]) expect(logs.some((text) => text.includes(value))).toBe(false);
@@ -43,6 +47,9 @@ test("complete real booking, double click guard, persisted availability after re
   await expect(page.getByRole("button", { name: "Отправляем заявку…" })).toBeDisabled(); await expect(page.locator("#phone")).toBeDisabled();
   release(); await expect(page.getByTestId("booking-id")).toBeVisible();
   expect(sent).toHaveLength(1); expect(count()).toBe(1);
+  const stored = db.prepare("SELECT id, status FROM bookings").get() as { id: string; status: string };
+  expect(stored).toEqual({ id: sent[0].requestId, status: "confirmed" });
+  expect(sent[0].requestId).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/);
   await expect(page.locator(".confirmation")).toContainText("Бронирование подтверждено и сохранено");
   await expect(page.locator(".confirmation")).not.toContainText("Тест"); await expect(page.getByTestId("confirmation-phone")).toHaveCount(0);
   await page.reload(); await expect(page.locator('[data-screen="welcome"]')).toBeVisible();
@@ -85,7 +92,11 @@ test("HTTP 400 permits correction with a consciously changed payload and new ID"
 });
 test("lost HTTP response after COMMIT is safely retried with the same ID", async ({ page }) => {
   const sent = requests(page); await contacts(page);
-  await page.route("**/api/bookings", async (route) => { await route.fetch(); await route.abort("failed"); }, { times: 1 });
+  await page.route("**/api/bookings", async (route) => {
+    const committed = await route.fetch(); expect(committed.status()).toBe(201);
+    expect(db.prepare("SELECT id, status FROM bookings").get()).toEqual({ id: route.request().postDataJSON().requestId, status: "confirmed" });
+    await route.abort("failed");
+  }, { times: 1 });
   await submit(page).click(); await expect(page.locator(".form-error")).toContainText("Заявка могла сохраниться"); expect(count()).toBe(1);
   await expect(page.locator("#phone")).toBeDisabled(); await expect(page.getByRole("button", { name: "← Назад", exact: true })).toBeDisabled();
   await expect(page.locator('[data-screen="confirmation"]')).toHaveCount(0);

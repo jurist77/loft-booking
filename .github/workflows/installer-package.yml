@@ -56,6 +56,22 @@ jobs:
         env:
           STUDIO_SOURCE_SHA: ${{ inputs.source_sha }}
         run: python3 scripts/installer/package.py --version "$STUDIO_SOURCE_SHA" --output "$RUNNER_TEMP/server.tar.gz"
+      - name: Install browser on the disposable release runner
+        run: npx playwright install --with-deps chromium
+      - name: Require real browser journeys from the exact release package
+        run: |
+          python3 - <<'PY'
+          import hashlib,os,pathlib
+          archive=pathlib.Path(os.environ['RUNNER_TEMP'])/'server.tar.gz'
+          with archive.open('rb') as stream: actual=hashlib.file_digest(stream,'sha256').hexdigest()
+          if actual != pathlib.Path(str(archive)+'.sha256').read_text().strip(): raise SystemExit('PACKAGE_CHECKSUM_FAILED')
+          PY
+          browser_package="$(mktemp -d "$RUNNER_TEMP/studio-browser-package-XXXXXX")"
+          trap 'rm -rf -- "$browser_package"' EXIT
+          tar --extract --gzip --no-same-owner --file "$RUNNER_TEMP/server.tar.gz" --directory "$browser_package"
+          export STUDIO_E2E_RELEASE_ROOT="$browser_package"
+          export CHROMIUM_PATH="$(node --input-type=module -e 'import { chromium } from "@playwright/test"; process.stdout.write(chromium.executablePath());')"
+          npm run test:server:browser
       # No real SSH connections in this PR: transport failures are mocked in
       # test_installer.py; the previous real_ssh.py is retained but not invoked.
       - name: Real systemd installation, updates, failures and schema-aware rollback on CI only
