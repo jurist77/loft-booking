@@ -58,6 +58,17 @@ jobs:
           STUDIO_SELECTED_VERSION: ${{ inputs.app_version || github.sha }}
           STUDIO_RESTORE_CONFIRMATION: ${{ inputs.confirmation }}
         run: python3 scripts/installer/verify-version.py
+      - name: Require successful current HTTPS-aware receiver checks before restoring any version
+        if: inputs.operation == 'restore'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          python3 - <<'PY'
+          import sys
+          sys.path.insert(0,'scripts/https')
+          from workflow import verified_main
+          verified_main()
+          PY
       - name: Encryption tooling on runner only
         if: inputs.operation == 'restore'
         run: |

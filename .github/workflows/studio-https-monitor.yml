@@ -1,0 +1,29 @@
+name: Monitor Studio HTTPS
+
+on:
+  schedule:
+    - cron: '23 * * * *'
+  workflow_dispatch:
+    inputs:
+      test_notification:
+        description: "Deliberately fail without network access to test your Actions failure notifications"
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    if: github.ref == 'refs/heads/main' && vars.STUDIO_HTTPS_MONITOR_ENABLED == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - name: Public trusted TLS, expiration and read-only health/API
+        env:
+          STUDIO_HTTPS_HOSTNAME: ${{ vars.STUDIO_HTTPS_MONITOR_HOSTNAME }}
+          STUDIO_TEST_NOTIFICATION: ${{ inputs.test_notification }}
+        run: PYTHONDONTWRITEBYTECODE=1 python3 scripts/https/monitor.py

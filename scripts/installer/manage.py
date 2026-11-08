@@ -12,11 +12,13 @@ import tempfile
 import time
 from backup import BackupError, GitHubStore, crypt, validate_bundle, validate_passphrase, publish, retrieve, complete_update, file_hash, managed
 from deploy import SSH, DeployError, remote_source, upload_payload, BOOTSTRAP, server_ip, safe_result
+from transport_settings import https_settings, https_origin
 
 
 class Peer:
     def __init__(self, ssh, address):
         self.ssh, self.address = ssh, address
+        self.https = None
 
     def call(self, args, output=None):
         command = "python3 - " + " ".join(shlex.quote(str(x)) for x in args)
@@ -34,6 +36,8 @@ class Peer:
             raise DeployError("REMOTE_PROTOCOL_FAILED")
         if value["installed"] and (not re.fullmatch(r"[a-f0-9]{40}", str(value.get("version", ""))) or not isinstance(value.get("port"), int)):
             raise DeployError("REMOTE_PROTOCOL_FAILED")
+        try: self.https = https_settings(value)
+        except ValueError: raise DeployError("REMOTE_PROTOCOL_FAILED") from None
         return value
 
     def snapshot(self, path, purpose, hold):
@@ -53,7 +57,7 @@ class Peer:
             raise DeployError("ARTIFACT_CHECKSUM_MISMATCH")
         with upload_payload(archive, version, checksum, self.address, receipt, bundle, confirmed=bool(bundle)) as stream:
             result = self.ssh.execute("python3 -c " + shlex.quote(BOOTSTRAP), stream, timeout=1800)
-        return safe_result(result, version, self.address)
+        return safe_result(result, version, self.address, self.https)
 
 
 def public_access(address, port):
@@ -129,9 +133,15 @@ def run_install(peer, store, phrase, artifacts, version, bundle=None):
         complete_update(store, receipt)
     if receipt and receipt.get("unavailable"):
         result["pre_restore_preservation"] = "local_original_directory_retained; offsite checkpoint unavailable"
-    result["public_access"] = public_access(peer.address, result["port"])
+    if result.get("https"):
+        import urllib.request
+        try:
+            with urllib.request.urlopen(https_origin(result["https"]) + "/api/health", timeout=5) as response:
+                result["public_access"] = "reachable" if response.status == 200 and json.loads(response.read(1024)) == {"status": "ok"} else "unreachable"
+        except Exception: result["public_access"] = "unreachable"
+    else: result["public_access"] = public_access(peer.address, result["port"])
     result["ssh"] = "connected"
-    result["warning"] = "HTTP_TEST_ONLY_SYNTHETIC_CONTACTS"
+    result["warning"] = "VERIFY_PUBLIC_HTTPS_AND_CERTIFICATE" if result.get("https") else "HTTP_TEST_ONLY_SYNTHETIC_CONTACTS"
     return result
 
 
@@ -151,7 +161,7 @@ def summary(value):
     if path:
         with open(path, "a") as output:
             output.write("## Studio 19.25 lifecycle\n\n```json\n" + message + "\n```\n\n")
-            output.write("Public HTTP is technical testing only: use fictional contacts. Internal health and external reachability are separate results. Firewall, VPN, reverse proxy and DNS are not changed.\n")
+            output.write("HTTP without TLS is technical testing only. Managed HTTPS is preserved; internal health and external TLS are separate checks. This lifecycle does not change firewall, VPN, proxy or DNS.\n")
 
 
 def main():

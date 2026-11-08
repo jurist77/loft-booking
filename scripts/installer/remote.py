@@ -25,6 +25,11 @@ import tempfile
 import time
 import uuid
 from types import SimpleNamespace
+try:
+    from transport_settings import https_settings, https_origin
+except ModuleNotFoundError:  # Importlib-based CI fixtures load this file directly.
+    sys.path.insert(0, str(Path(__file__).resolve().parent))
+    from transport_settings import https_settings, https_origin
 
 BASE = Path("/opt/studio1925")
 CONFIG = Path("/etc/studio1925")
@@ -138,7 +143,7 @@ def owned_directory(path, uid=0, gid=0, mode=0o700, create=False):
         require(stat.S_IMODE(info.st_mode) == mode, "PRIVATE_DIRECTORY_REQUIRED")
 
 
-def load_state(allow_pending=False):
+def load_state(allow_pending=False, allow_https_pending=False):
     path = CONFIG / "state.json"
     if not path.exists():
         # Never adopt another application's account/files/unit.
@@ -153,13 +158,16 @@ def load_state(allow_pending=False):
     require(stat.S_ISREG(info.st_mode) and info.st_uid == 0 and info.st_nlink == 1 and stat.S_IMODE(info.st_mode) == 0o600, "UNSAFE_STATE")
     state = json.loads(path.read_text())
     require(state.get("format") == 1 and state.get("managed_by") == "studio-installer", "UNMANAGED_STATE")
+    require(not state.get("https_pending") or allow_https_pending, "HTTPS_TRANSACTION_PENDING")
+    try: https_settings(state)
+    except ValueError: raise InstallError("UNSAFE_HTTPS_STATE") from None
     phases = ("ready", "failed-first", "snapshotting", "backup-pending", "updating") if allow_pending else ("ready", "failed-first")
     require(state.get("phase") in phases, "INTERRUPTED_INSTALL_REQUIRES_REVIEW")
     if state.get("current"):
         require(isinstance(state.get("port"), int) and (state["port"] == 3000 or 3100 <= state["port"] <= 3199), "UNSAFE_STATE")
         require(re.fullmatch(r"[0-9a-f]{40}-[0-9a-f]{16}-[0-9a-f]{8}", state["current"]), "UNSAFE_STATE")
         require(UNIT.is_file() and not UNIT.is_symlink(), "UNIT_CHANGED_OUTSIDE_INSTALLER")
-        if not (allow_pending and state["phase"] == "updating"):
+        if not (allow_pending and state["phase"] == "updating") and not (allow_https_pending and state.get("https_pending")):
             require(digest(UNIT) == state.get("unit_sha256"), "UNIT_CHANGED_OUTSIDE_INSTALLER")
     return state
 
@@ -225,13 +233,13 @@ def ipv6_available():
         return False
 
 
-def choose_port(preferred=None):
-    v6_enabled = ipv6_available()
+def choose_port(preferred=None, loopback=False):
+    v6_enabled = not loopback and ipv6_available()
     for port in ((preferred,) if preferred is not None else (3000, *range(3100, 3200))):
         with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as probe:
             try:
                 probe.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-                probe.bind(("0.0.0.0", port))
+                probe.bind(("127.0.0.1" if loopback else "0.0.0.0", port))
                 if v6_enabled:
                     with socket.socket(socket.AF_INET6, socket.SOCK_STREAM) as v6:
                         v6.setsockopt(socket.IPPROTO_IPV6, socket.IPV6_V6ONLY, 1)
@@ -242,7 +250,9 @@ def choose_port(preferred=None):
     raise InstallError("NO_FREE_LOOPBACK_PORT")
 
 
-def service_text(release, port):
+def service_text(release, port, https=None):
+    if https: https_origin(https)  # Validate before rendering any unit.
+    bind = "127.0.0.1" if https else "::" if ipv6_available() else "0.0.0.0"
     return f"""# Managed by Studio installer; host VPN/network/proxy are out of scope.
 [Unit]
 Description=Studio 19.25 SERVER
@@ -259,7 +269,7 @@ WorkingDirectory=/app
 MountAPIVFS=true
 BindPaths={DATA}:/data {CACHE}:/app/.next-server/cache {DATA}/photos:/app/public/images
 EnvironmentFile={CONFIG}/server.env
-ExecStart=/usr/bin/node /app/node_modules/next/dist/bin/next start --hostname {"::" if ipv6_available() else "0.0.0.0"} --port {port}
+ExecStart=/usr/bin/node /app/node_modules/next/dist/bin/next start --hostname {bind} --port {port}
 Restart=on-failure
 RestartSec=5
 TimeoutStopSec=30
@@ -288,11 +298,11 @@ WantedBy=multi-user.target
 """
 
 
-def environment_text(port, origin=None):
-    public = origin or f"http://127.0.0.1:{port}"
+def environment_text(port, origin=None, https=None):
+    public = https_origin(https) if https else origin or f"http://127.0.0.1:{port}"
     return ("APP_MODE=server\nDEPLOY_TARGET=node\nNODE_ENV=production\nNEXT_TELEMETRY_DISABLED=1\n"
             "SQLITE_PATH=/data/studio.sqlite\nSQLITE_BUSY_TIMEOUT_MS=1000\n"
-            f"API_PUBLIC_ORIGIN={public}\nAPI_TRUST_PROXY=false\nAPI_ALLOW_INSECURE_TEST_HTTP=true\n")
+            f"API_PUBLIC_ORIGIN={public}\nAPI_TRUST_PROXY={'true' if https else 'false'}\nAPI_ALLOW_INSECURE_TEST_HTTP={'false' if https else 'true'}\n")
 
 
 def helper(release, arguments, code, data_dir=None):
@@ -345,7 +355,7 @@ def api_health(port):
     date = (datetime.datetime.now(datetime.timezone.utc) + datetime.timedelta(days=2)).strftime("%Y-%m-%d")
     connection = http.client.HTTPConnection("127.0.0.1", port, timeout=5)
     try:
-        connection.request("GET", "/api/availability?date=" + date)
+        connection.request("GET", "/api/availability?date=" + date, headers={"X-Studio-Client-IP": "127.0.0.1"})
         response = connection.getresponse()
         value = json.loads(response.read(65536))
         require(response.status == 200 and value.get("date") == date and value.get("resourceId") == "studio-19-25"
@@ -373,9 +383,13 @@ def install(archive_path, checksum, version, origin_host=None, receipt=None, res
         for path in (DATA, BACKUPS, CACHE):
             owned_directory(path, account.pw_uid, account.pw_gid)
         if state.get("current") and not (restore_bundle and confirmed):
-            expected = environment_text(state["port"], state.get("origin"))
+            expected = environment_text(state["port"], state.get("origin"), https_settings(state))
             legacy = environment_text(state["port"]).replace("API_ALLOW_INSECURE_TEST_HTTP=true\n", "")
-            require(private_environment() in (expected, legacy), "ENVIRONMENT_CHANGED_OUTSIDE_INSTALLER")
+            require(private_environment() in ((expected,) if https_settings(state) else (expected, legacy)), "ENVIRONMENT_CHANGED_OUTSIDE_INSTALLER")
+    if restore_bundle:
+        from backup import validate_bundle
+        source_https = https_settings(validate_bundle(restore_bundle))
+        require(not source_https or https_settings(state), "HTTPS_TARGET_REQUIRED_FOR_RESTORE")
     if state and state.get("current") and state.get("version") == version and not restore_bundle:
         try:
             health(state["port"], timeout=5)
@@ -388,7 +402,7 @@ def install(archive_path, checksum, version, origin_host=None, receipt=None, res
             helper(BASE / "releases" / state["current"], ["scripts/installer/acceptance.mjs"], "TECHNICAL_ACCEPTANCE_FAILED")
             run(["systemctl", "enable", SERVICE], "SERVICE_ENABLE_FAILED")
             return {"status": "SUCCESS", "version": version, "operation": "already-current", "migrations": "unchanged",
-                    "service": "active-enabled", "health": 200, "port": state["port"], "url": state.get("origin", f"http://127.0.0.1:{state['port']}"), "technical_acceptance": "passed"}
+                    "service": "active-enabled", "health": 200, "port": state["port"], "url": state.get("origin", f"http://127.0.0.1:{state['port']}"), "technical_acceptance": "passed", "https": https_settings(state)}
     if state and state.get("current"):
         if restore_bundle and confirmed and receipt and receipt.get("unavailable") is True:
             # Explicit restore always preserves the whole original data directory.
@@ -466,15 +480,18 @@ def install(archive_path, checksum, version, origin_host=None, receipt=None, res
         else:
             helper(release, ["scripts/database.mjs", "migrate"], "MIGRATION_FAILED")
         helper(release, ["scripts/database.mjs", "check"], "DATABASE_CHECK_FAILED")
-        port = choose_port(state.get("port") if old_release else None)
-        if origin_host:
+        transport = https_settings(state)
+        port = choose_port(state.get("port") if old_release else None, loopback=bool(transport))
+        if transport:
+            origin = https_origin(transport)
+        elif origin_host:
             import ipaddress
             address = ipaddress.ip_address(origin_host)
             origin = f"http://{'[' + address.compressed + ']' if address.version == 6 else address.compressed}:{port}"
         else:
             origin = state.get("origin") or f"http://127.0.0.1:{port}"
-        atomic_write(CONFIG / "server.env", environment_text(port, origin))
-        atomic_write(UNIT, service_text(release, port), 0o644)
+        atomic_write(CONFIG / "server.env", environment_text(port, origin, transport))
+        atomic_write(UNIT, service_text(release, port, transport), 0o644)
         run(["systemctl", "daemon-reload"], "SYSTEMD_RELOAD_FAILED")
         run(["systemctl", "reset-failed", SERVICE], check=False)
         run(["systemctl", "start", SERVICE], "APP_START_FAILED", timeout=45)
@@ -488,7 +505,7 @@ def install(archive_path, checksum, version, origin_host=None, receipt=None, res
         state.pop("pending", None)
         store_state(state)
         return {"status": "SUCCESS", "version": version, "operation": "restore" if restored_from else ("update" if old_release else "install"),
-                "migrations": "verified", "service": "active-enabled", "health": 200, "port": port, "url": origin, "technical_acceptance": "passed"}
+                "migrations": "verified", "service": "active-enabled", "health": 200, "port": port, "url": origin, "technical_acceptance": "passed", "https": transport}
     except BaseException as error:
         # SIGTERM/HUP are converted to InstallError; never delete or restore customer data.
         for sig in (signal.SIGTERM, signal.SIGHUP, signal.SIGINT):

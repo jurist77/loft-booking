@@ -11,7 +11,7 @@ if "Unsafe" not in globals():
     from rules import Unsafe
 
 
-def listener_records(data):
+def listener_records(data, expected_port=3000):
     """Parse only the fixed, port-filtered ss commands; reject partial records."""
     records = []
     for family in (4, 6):
@@ -29,7 +29,7 @@ def listener_records(data):
                 address = address.split("%", 1)[0]
                 if address == "*": address = "0.0.0.0" if family == 4 else "::"
                 ip = ipaddress.ip_address(address)
-                if ip.version != family or port != "3000": raise ValueError()
+                if ip.version != family or port != str(expected_port): raise ValueError()
             except ValueError: raise Unsafe("READS_INCOMPLETE") from None
             inodes = re.findall(r"(?<!\S)ino:([0-9]+)(?=\s|$)", metadata)
             cookies = re.findall(r"(?<!\S)sk:([0-9a-fA-F]+)(?=\s|$)", metadata)
@@ -54,10 +54,10 @@ def listener_records(data):
 def ownership_key(record, pid, fd): return f"{pid}:{fd}:{record['inode']}"
 
 
-def listener_ownership(data, pid, readlink=os.readlink):
+def listener_ownership(data, pid, readlink=os.readlink, expected_port=3000):
     """Inspect only Studio's numeric fd links, never another application's files."""
     result = {}
-    for record in listener_records(data):
+    for record in listener_records(data, expected_port=expected_port):
         for owner, fd in record["owners"]:
             if owner != pid or pid <= 0: continue
             try: verified = readlink(f"/proc/{pid}/fd/{fd}") == f"socket:[{record['inode']}]"

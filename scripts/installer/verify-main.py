@@ -24,7 +24,7 @@ def main():
         if result.returncode:
             raise DeployError("MAIN_CHECKS_UNAVAILABLE")
         runs = json.loads(result.stdout)
-        for name in ("Check backend foundation", "Check read-only VPS audit tool", "Check universal installer"):
+        for name in ("Check backend foundation", "Check read-only VPS audit tool", "Check universal installer", "Check Studio HTTPS"):
             matches = sorted([run for run in runs if run["name"] == name], key=lambda run: run["databaseId"], reverse=True)
             if not matches or matches[0]["status"] != "completed" or matches[0]["conclusion"] != "success":
                 raise DeployError("MAIN_CHECKS_NOT_SUCCESSFUL")

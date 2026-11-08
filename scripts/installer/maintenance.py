@@ -13,6 +13,7 @@ import sys
 import tarfile
 import tempfile
 import uuid
+from transport_settings import https_settings
 from backup import validate_bundle, file_hash
 
 
@@ -63,7 +64,7 @@ class Maintenance:
                 pass
         return {"status": "INFO", "installed": True, "healthy": healthy, "version": state["version"], "instance": state.get("instance"),
                 "port": state["port"], "phase": state["phase"], "nonce": state.get("pending", {}).get("nonce"),
-                "arch": o.host_facts()["arch"]}
+                "arch": o.host_facts()["arch"], "https": https_settings(state)}
 
     def abort(self, nonce):
         o = self.o
@@ -117,6 +118,7 @@ class Maintenance:
                             "instance": prior["instance"], "nonce": nonce, "purpose": purpose,
                             "created_utc": dt.datetime.now(dt.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
                             "migrations": json.loads((release / "manifest.json").read_text())["migrations"], "files": files}
+                if https_settings(prior): manifest["https"] = https_settings(prior)
                 (folder / "manifest.json").write_text(json.dumps(manifest, sort_keys=True))
                 archive_path = folder / "snapshot.tar.gz"
                 with tarfile.open(archive_path, "w:gz", compresslevel=1) as archive:

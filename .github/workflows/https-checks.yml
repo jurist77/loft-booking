@@ -1,0 +1,25 @@
+name: Check Studio HTTPS
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  fixtures:
+    strategy:
+      fail-fast: false
+      matrix:
+        runner: [ubuntu-24.04, ubuntu-24.04-arm]
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - name: Isolated settings, preflight, DNS, transport, rollback and privacy fixtures
+        run: PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s tests/https -v

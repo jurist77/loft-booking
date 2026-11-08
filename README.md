@@ -53,6 +53,8 @@ POST требует точного `Origin`, JSON не более 4096 байт 
 
 [HTTPS: read-only аудит и проект внедрения](docs/https-readiness.md) — ручной workflow **Diagnose Studio HTTPS readiness**, варианты DuckDNS/Let's Encrypt и IP-сертификатов, Origin/proxy/cutover/renew/rollback. Этот этап не устанавливает TLS и не открывает порты; сначала фактический аудит и отдельное согласование владельца.
 
+[Управляемый HTTPS: Caddy, ручной check/apply, сохранение HTTPS при обновлении/restore и мониторинг](docs/managed-https.md). Подготовка PR не выполняет изменений на VPS; реальный запуск требует отдельного разрешения.
+
 ## Проверки
 
 ```bash
