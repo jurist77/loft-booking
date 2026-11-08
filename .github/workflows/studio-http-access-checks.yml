@@ -1,0 +1,33 @@
+name: Check Studio HTTP access
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  fixtures:
+    strategy:
+      fail-fast: false
+      matrix:
+        runner: [ubuntu-24.04, ubuntu-24.04-arm]
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - name: Isolated fixtures only; never SSH, UFW writes or real VPS
+        env:
+          STUDIO_UFW_TEST_SOURCE: ${{ runner.temp }}/studio-ufw-source
+        run: |
+          curl --fail --silent --show-error --location --max-time 60 \
+            https://archive.ubuntu.com/ubuntu/pool/main/u/ufw/ufw_0.36.2-6_all.deb \
+            --output "$RUNNER_TEMP/studio-ufw.deb"
+          echo "096eb403ecaf6740d160bb306970f025222ef71324319cc1cb78d06dfa462ef1  $RUNNER_TEMP/studio-ufw.deb" | sha256sum --check --status
+          dpkg-deb --extract "$RUNNER_TEMP/studio-ufw.deb" "$STUDIO_UFW_TEST_SOURCE"
+          PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s tests/firewall -v
