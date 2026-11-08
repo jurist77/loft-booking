@@ -45,7 +45,7 @@ Package publication и прежняя systemd/rollback приёмка остаю
 | TypeScript / lint | passed |
 | SERVER build / Node DEMO / static DEMO / export audit / isolation | passed |
 | Ubuntu 24.04 x64 native package build | passed; локальный fixture, не опубликован |
-| ARM64 local validation | Проверяется отдельно; native GitHub CI ещё не подтверждён |
+| Ubuntu 24.04 ARM64 / Node 24.12.0 | SERVER build и нативный better-sqlite3 3.53.4 passed под user-space ARM-эмуляцией; native GitHub CI не подтверждён |
 | Final-SHA GitHub CI x64/ARM64 | Не подтверждён: API из среды ограничен |
 
 Главные файлы: `src/lib/request-id.ts`, `server-booking-service.ts` и unit tests;
@@ -66,3 +66,10 @@ marker; они не объявляются готовым опубликован
 на VPS, изменений VPN/firewall/SSH/других приложений. Новый production diagnostic API
 не добавлен; отдельный DB workflow для воспроизведения client-side сбоя не потребовался.
 Отдельный обычный PR от main после PR №16. Не выполнять merge автоматически.
+
+Создание обычного PR через `gh pr create` остановлено средой на
+`POST https://api.github.com/graphql: Forbidden`. Чтение Actions через `gh run list`
+также даёт Forbidden; итоговый GitHub CI нельзя объявить успешным. Ветка отправлена:
+`fix/server-booking-confirmation`. [Открыть обычный PR](https://github.com/jurist77/loft-booking/compare/main...fix/server-booking-confirmation?expand=1),
+base `main`, head `fix/server-booking-confirmation`; использовать это описание,
+не включать Draft и не выполнять merge/deploy.
