@@ -1,6 +1,7 @@
 import { afterEach, expect, it, vi } from "vitest";
 import { createServerService } from "./server-booking-service";
 import { BookingClientError } from "./booking-service";
+import { webcrypto } from "node:crypto";
 
 const now = new Date("2026-10-19T08:00:00+03:00");
 const request = { date: "2026-10-20", start: 600, end: 660, contact: { firstName: " Тест ", lastName: "Пример", phone: "8 (900) 000-00-00" } };
@@ -12,7 +13,43 @@ const success = (_url: unknown, init?: RequestInit) => {
   return Promise.resolve(Response.json({ bookingId: body.requestId, status: "confirmed", date: body.date, start: body.start, end: body.end, resourceId: body.resourceId }, { status: 201 }));
 };
 const failure = (status: number, code = "UNAVAILABLE", headers = {}) => Response.json({ error: { code, message: "private-path-and-contact-must-not-be-displayed" } }, { status, headers });
-afterEach(() => { vi.useRealTimers(); vi.restoreAllMocks(); });
+afterEach(() => { vi.useRealTimers(); vi.restoreAllMocks(); vi.unstubAllGlobals(); });
+
+it("uses the production UUID fallback and preserves its ID after a lost committed response", async () => {
+  const random = vi.fn(webcrypto.getRandomValues.bind(webcrypto));
+  vi.stubGlobal("crypto", { getRandomValues: random });
+  const stored = new Set<string>();
+  const fetcher = vi.fn<typeof fetch>().mockImplementation(async (url, init) => {
+    stored.add(payload(init).requestId);
+    if (fetcher.mock.calls.length === 1) throw new TypeError("lost response after commit");
+    return success(url, init);
+  });
+  const service = createServerService({ fetcher }); // No injected UUID factory.
+  await expect(service.confirm(request, now)).rejects.toMatchObject({ kind: "unknown", uncertain: true });
+  expect(stored.size).toBe(1); expect(service.isRetry?.(request)).toBe(true);
+  const result = await service.confirm(request, now);
+  expect(result.bookingId).toBe(payload(fetcher.mock.calls[0][1]).requestId);
+  expect(payload(fetcher.mock.calls[1][1]).requestId).toBe(result.bookingId);
+  expect(random).toHaveBeenCalledTimes(1); expect(stored.size).toBe(1);
+});
+it("reports UUID preparation failure before POST without claiming a lost response", async () => {
+  vi.stubGlobal("crypto", undefined);
+  const fetcher = vi.fn<typeof fetch>(); const service = createServerService({ fetcher });
+  await expect(service.confirm(request, now)).rejects.toMatchObject({ kind: "input", uncertain: false });
+  expect(fetcher).not.toHaveBeenCalled(); expect(service.isRetry?.(request)).toBe(false);
+});
+it("a failed new ID does not discard an earlier uncertain attempt or prevent its safe replay", async () => {
+  vi.stubGlobal("crypto", { getRandomValues: webcrypto.getRandomValues.bind(webcrypto) });
+  const fetcher = vi.fn<typeof fetch>().mockRejectedValueOnce(new Error("lost reply")).mockImplementation(success);
+  const service = createServerService({ fetcher });
+  await expect(service.confirm(request, now)).rejects.toMatchObject({ uncertain: true });
+  const original = payload(fetcher.mock.calls[0][1]).requestId;
+  service.acknowledgeChange?.(); vi.stubGlobal("crypto", undefined);
+  await expect(service.confirm({ ...request, end: 690 }, now)).rejects.toMatchObject({ kind: "input", uncertain: true });
+  expect(fetcher).toHaveBeenCalledTimes(1); expect(service.isRetry?.(request)).toBe(true);
+  expect((await service.confirm(request, now)).bookingId).toBe(original);
+  expect(payload(fetcher.mock.calls[1][1]).requestId).toBe(original);
+});
 
 it("loads only selected resource/date with no-store, same-origin and no contact data", async () => {
   const fetcher = vi.fn<typeof fetch>().mockResolvedValue(Response.json({ date: request.date, resourceId: "test-room", timezone: "Europe/Moscow", busy: [{ start: "12:00", end: "14:00" }] }));

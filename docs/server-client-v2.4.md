@@ -1,5 +1,8 @@
 # Пятиэкранный SERVER-клиент — этап 2.4
 
+Исправление UUID для временного HTTP-origin и release browser gate описаны в
+[booking-confirmation-recovery.md](booking-confirmation-recovery.md).
+
 Основание — актуальный `main` `756c9e153bd52ba1d0e23bdb191005e8e4beaa13` после merge PR №9. Ветка `feat/booking-server-ui-v2.4`. API/SQLite/миграции 0001/0002 не изменены. Один Next.js, без дополнительных backend-компонентов и зависимостей.
 
 ## Путь пользователя
