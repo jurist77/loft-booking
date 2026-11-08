@@ -119,6 +119,8 @@ def _https_health(host, address, minimum, context, api, port):
         def get(path):
             connection.request("GET", path, headers={"Connection": "keep-alive"})
             response = connection.getresponse(); raw = response.read(32769)
+            require(response.status != 503, "HTTPS_APPLICATION_UNAVAILABLE")
+            require(response.status != 429, "HTTPS_VERIFICATION_RATE_LIMITED")
             require(response.status == 200 and len(raw) <= 32768, "HTTPS_HEALTH_OR_API_FAILED")
             return json.loads(raw), response
         value, _ = get("/api/health")
@@ -130,7 +132,8 @@ def _https_health(host, address, minimum, context, api, port):
             require(all(isinstance(v, dict) and set(v) == {"start", "end"} for v in value["busy"]) and "no-store" in response.getheader("Cache-Control", ""), "HTTPS_API_CONTRACT_FAILED")
         return {"fingerprint": fingerprint, "lifetime_ok": True}
     except HttpsError: raise
-    except Exception: raise HttpsError("HTTPS_VERIFICATION_FAILED") from None
+    except ssl.SSLCertVerificationError as error: raise HttpsError("CERTIFICATE_TRUST_OR_NAME_FAILED") from error
+    except Exception as error: raise HttpsError("HTTPS_VERIFICATION_FAILED") from error
     finally: connection.close()
 
 

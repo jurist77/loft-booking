@@ -183,10 +183,14 @@ class Operations:
 
     def certificate(self, host, port):
         end = time.monotonic() + 240
+        last_error = None
         while time.monotonic() < end:
             try: return self.verifier(host, "127.0.0.1")
-            except HttpsError: time.sleep(2)
-        raise HttpsError("TRUSTED_CERTIFICATE_NOT_READY")
+            except HttpsError as error:
+                if str(error) in ("HTTPS_APPLICATION_UNAVAILABLE", "HTTPS_VERIFICATION_RATE_LIMITED", "HTTPS_HEALTH_OR_API_FAILED", "HTTPS_API_CONTRACT_FAILED"): raise
+                last_error = error
+                time.sleep(2)
+        raise HttpsError("TRUSTED_CERTIFICATE_NOT_READY") from last_error
 
     def cutover(self, checkpoint, current):
         prior = checkpoint["prior"]
@@ -301,11 +305,11 @@ def apply(options, archive, source, ops=None, emit=event, ack=acknowledge, probe
             ops.commit(checkpoint, current, new_state)
             committed = True
             emit("result", status="SUCCESS", operation="https-enabled", changes="studio-tls-only")
-        except BaseException:
+        except BaseException as original:
             if committed: raise HttpsError("HTTPS_COMMITTED_RESULT_UNCONFIRMED_CHECK_AGAIN") from None
             try: ops.rollback(checkpoint)
             except BaseException: raise HttpsError("MANUAL_REVIEW_REQUIRED_CHECKPOINT_RETAINED") from None
-            raise HttpsError("HTTPS_COMMITTED_RECOVERED_CHECK_AGAIN" if checkpoint["stage"] == "public-verified" else "HTTPS_FAILED_PRIOR_CONFIGURATION_RESTORED") from None
+            raise HttpsError("HTTPS_COMMITTED_RECOVERED_CHECK_AGAIN" if checkpoint["stage"] == "public-verified" else "HTTPS_FAILED_PRIOR_CONFIGURATION_RESTORED") from original
 
 
 def entry(options=None, archive=b"", source=""):

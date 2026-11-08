@@ -57,6 +57,9 @@ def main():
     hostname='fixture.duckdns.org';nonce=secrets.token_hex(32);options={'hostname':hostname,'addresses':['127.0.0.1'],'nonce':nonce}
     host.RELEASE=RELEASE
     source=workflow.source().decode();fingerprints=None
+    # CI fixture only: Caddy journals contain only our synthetic hostname and
+    # ephemeral CA metadata. Production service output remains disabled.
+    host.service=lambda binary:cfg.service(binary).replace('StandardOutput=null','StandardOutput=journal').replace('StandardError=null','StandardError=journal')
     ca=host.DATA/'storage/pki/authorities/local/root.crt'
     alias='studio-https-ci-'+uuid.uuid4().hex
     os_ca=Path('/usr/local/share/ca-certificates')/(alias+'.crt')
@@ -65,11 +68,15 @@ def main():
     assert hostname not in hosts.read_text()
     canary=Path('/etc/systemd/system/studio-ci-vpn.service');canary_directory=Path('/opt/studio-ci-vpn')
     assert not canary.exists() and not canary_directory.exists()
-    ctx=None
+    ctx=None;last_verification=None
     def verify(name,address,**kwargs):
+        nonlocal last_verification
         try:context=ssl.create_default_context(cafile=str(ca))
         except OSError:raise checks.HttpsError('TEST_CA_NOT_READY') from None
-        return checks.https_health(name,address,minimum=30,context=context,**kwargs)
+        try:return checks.https_health(name,address,minimum=30,context=context,**kwargs)
+        except checks.HttpsError as error:
+            if last_verification!=str(error):print('CI_ONLY_TLS_VERIFY_'+str(error),flush=True);last_verification=str(error)
+            raise
     def inspect(state,addresses,managed=False,allow_stopped=False):
         I.host_facts()
         assert I.private_environment()==I.environment_text(state['port'],state.get('origin'),I.https_settings(state))
@@ -170,6 +177,11 @@ def main():
         assert command(['systemctl','is-active',canary.name]).stdout.strip()=='active'
         ci.assert_unchanged(fingerprints)
         print('REAL_HTTPS_CI_OK: trusted browser/SQLite, response loss, spoof protection, crash recovery, repeat, update, restore, UDP neighbor preserved',flush=True)
+    except BaseException:
+        print('CI_ONLY_TLS_FAILURE_DIAGNOSTIC',flush=True)
+        log=command(['journalctl','-u',cfg.SERVICE,'-n','25','--no-pager','-o','cat'],False).stdout
+        print(log[-12000:],flush=True)
+        raise
     finally:
         for unit in (cfg.MONITOR_TIMER,cfg.RECOVERY_TIMER,cfg.SERVICE):
             command(['systemctl','stop',unit],False);command(['systemctl','disable',unit],False)
