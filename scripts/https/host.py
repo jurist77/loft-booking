@@ -41,9 +41,14 @@ def private_json(path):
 def owned():
     if not OWNER.exists():
         require(not any(p.exists() or p.is_symlink() for p in (BASE, ETC, DATA, UNIT_DIR / SERVICE, UNIT_DIR / RECOVERY_SERVICE, UNIT_DIR / RECOVERY_TIMER, UNIT_DIR / MONITOR_SERVICE, UNIT_DIR / MONITOR_TIMER)), "UNMANAGED_TLS_PATH_COLLISION")
-        for unit in (SERVICE, *auxiliary_units()):
-            require(not I.run(["systemctl", "list-unit-files", unit, "--no-legend", "--no-pager"], "TLS_UNIT_INVENTORY_FAILED").strip() and
-                    not I.run(["systemctl", "list-units", unit, "--all", "--no-legend", "--no-pager"], "TLS_UNIT_INVENTORY_FAILED").strip(), "UNMANAGED_TLS_UNIT_COLLISION")
+        # An exact missing name makes list-unit-files exit 1 on systemd 255.
+        # Enumerate successfully, then compare names; don't treat arbitrary
+        # command errors as evidence that a service is absent.
+        units = set()
+        for argv in (["systemctl", "list-unit-files", "--plain", "--no-legend", "--no-pager"],
+                     ["systemctl", "list-units", "--all", "--plain", "--no-legend", "--no-pager"]):
+            units.update(line.split()[0] for line in I.run(argv, "TLS_UNIT_INVENTORY_FAILED").splitlines() if line.strip())
+        require(not units.intersection((SERVICE, *auxiliary_units())), "UNMANAGED_TLS_UNIT_COLLISION")
         try: pwd.getpwnam(USER)
         except KeyError: return None
         raise HttpsError("UNMANAGED_TLS_USER_COLLISION")
@@ -84,6 +89,18 @@ class PortProbe:
         class Server(http.server.ThreadingHTTPServer):
             daemon_threads = True
             allow_reuse_address = False
+            request_queue_size = 8
+            def __init__(self, *args, **kwargs):
+                self.slots = threading.BoundedSemaphore(8)
+                super().__init__(*args, **kwargs)
+            def process_request(self, request, client_address):
+                if not self.slots.acquire(blocking=False):
+                    self.shutdown_request(request); return
+                try: super().process_request(request, client_address)
+                except BaseException: self.slots.release(); raise
+            def process_request_thread(self, request, client_address):
+                try: super().process_request_thread(request, client_address)
+                finally: self.slots.release()
             def get_request(self):
                 conn, address = super().get_request(); conn.settimeout(3); return conn, address
             def handle_error(self, *args): pass

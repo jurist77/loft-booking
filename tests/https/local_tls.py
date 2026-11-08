@@ -61,8 +61,8 @@ def main():
             assert send(body)[0]==201
             assert send({**body,'requestId':str(uuid.uuid4())})[0]==409
             assert send(body,'https://untrusted.example')[0]==403
-            # The committed request survives both process restarts; source DB is
-            # private and separate from any installed data directory.
+            # Source DB is private and separate from installed data. Real
+            # restart/update/restore persistence is tested by real_systemd.py.
             print('LOCAL_TLS_API_OK: CA/SAN verified, real SQLite COMMIT/idempotency/overlap/origin',flush=True)
             end=time.monotonic()+120;rotated=False
             while time.monotonic()<end:

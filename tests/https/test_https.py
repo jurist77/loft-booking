@@ -105,6 +105,19 @@ class Fixture:
 
 
 class HttpsTests(unittest.TestCase):
+    def test_absent_units_are_enumerated_successfully_without_ignoring_systemd_errors(self):
+        with tempfile.TemporaryDirectory() as tmp,contextlib.ExitStack() as stack:
+            root=Path(tmp)
+            for name in ('OWNER','BASE','ETC','DATA','UNIT_DIR'):stack.enter_context(patch.object(host,name,root/name))
+            stack.enter_context(patch.object(host.pwd,'getpwnam',side_effect=KeyError))
+            run=stack.enter_context(patch.object(host.I,'run',return_value='ssh.service enabled enabled\n'))
+            self.assertIsNone(host.owned())
+            self.assertTrue(all(cfg.SERVICE not in call.args[0] for call in run.call_args_list))
+            run.return_value=cfg.SERVICE+' disabled enabled\n'
+            with self.assertRaisesRegex(checks.HttpsError,'UNMANAGED_TLS_UNIT_COLLISION'):host.owned()
+            run.side_effect=remote.InstallError('TLS_UNIT_INVENTORY_FAILED')
+            with self.assertRaisesRegex(remote.InstallError,'TLS_UNIT_INVENTORY_FAILED'):host.owned()
+
     def test_input_validation_exact_confirmation_and_dual_stack(self):
         self.assertEqual(cfg.inputs({'server_ip':IP,'hostname':DOMAIN,'mode':'apply','confirmation':cfg.CONFIRMATION},fixture=True)['addresses'],[IP])
         for change in ({'confirmation':''},{'confirmation':cfg.CONFIRMATION+' '},{'hostname':'$(bad).duckdns.org'},{'server_ip':'127.0.0.1'},{'server_ip':'https://192.0.2.10'},{'additional_ip':'192.0.2.11'},{'hostname':'example.com'}):
@@ -167,6 +180,23 @@ class HttpsTests(unittest.TestCase):
         for key,value in (('ufw','Status: active\nDefault: allow (incoming)'),('ip4','*nat\n:PREROUTING ACCEPT [0:0]\n-A PREROUTING -j REDIRECT\nCOMMIT\n'),('ip6','*filter\n:INPUT DROP [0:0]\nCOMMIT\n'),('nft','{"nftables":[{"set":{}}]}'),('legacy4','unexpected'),('nft','{"nftables":[{"chain":{"hook":"input","policy":"drop"}}]}')):
             with self.assertRaises(checks.HttpsError):inventory.empty_firewall({**data,key:value})
         for key in ('ip4','ip6','legacy4','legacy6'):self.assertEqual(inventory.COMMANDS[key][-2:],('-M','/bin/false'))
+
+    def test_tls_listener_requires_exact_pid_fd_inode_on_each_port_and_family(self):
+        def row(port,pid=123,inode=456):
+            return f'LISTEN 0 4096 [::]:{port} [::]:* users:(("caddy",pid={pid},fd=8)) ino:{inode} sk:af v6only:0'
+        for port in (80,443):
+            data={'sockets4':'','sockets6':row(port)}
+            self.assertEqual(inventory.own_listeners(data,123,port,lambda p:'socket:[456]')[0]['family'],6)
+            for changed,link in ((row(port,124),'socket:[456]'),(row(port),'socket:[999]'),(row(port)+'\n'+row(port,124,457),'socket:[456]')):
+                with self.assertRaises(checks.HttpsError):inventory.own_listeners({'sockets4':'','sockets6':changed},123,port,lambda p:link)
+        with self.assertRaises(Exception):inventory.own_listeners({'sockets4':'','sockets6':row(3000)},123,443,lambda p:'socket:[456]')
+
+    def test_external_proof_rejects_certificate_disagreement_or_public_backend(self):
+        verify=workflow.verifier({'hostname':DOMAIN,'addresses':[IP]},NONCE)
+        with patch.object(workflow,'dns_records'),patch.object(workflow,'https_health',return_value={'fingerprint':'c'*64}):
+            with self.assertRaisesRegex(checks.HttpsError,'CERTIFICATE_PATH_DISAGREES'):verify('certificate-ready',{'fingerprint':'b'*64,'port':3000})
+        with patch.object(workflow,'dns_records'),patch.object(workflow,'https_health',return_value={'fingerprint':'b'*64}),patch.object(workflow,'closed',return_value=False):
+            with self.assertRaisesRegex(checks.HttpsError,'PUBLIC_BACKEND_STILL_REACHABLE'):verify('cutover-ready',{'fingerprint':'b'*64,'port':3000})
 
     def test_success_order_http_preserved_until_external_tls_and_sqlite_unchanged(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -281,6 +311,17 @@ class HttpsTests(unittest.TestCase):
                 port=probe.servers[0].server_address[1]
                 checks.port_challenge('127.0.0.1',port,NONCE)
                 with self.assertRaises(checks.HttpsError):checks.port_challenge('127.0.0.1',port,'a'*64)
+                slots=probe.servers[0].slots
+                # Saturated workers refuse new sockets rather than creating
+                # unbounded public threads. Wait for the prior handler exit.
+                acquired=[]
+                for _ in range(8):
+                    self.assertTrue(slots.acquire(timeout=2));acquired.append(True)
+                try:
+                    with self.assertRaises(checks.HttpsError):checks.port_challenge('127.0.0.1',port,NONCE)
+                finally:
+                    for _ in acquired:slots.release()
+                checks.port_challenge('127.0.0.1',port,NONCE)
             self.assertTrue(checks.closed('127.0.0.1',port))
 
     def test_monitor_failure_and_notification_test_never_repairs_or_connects(self):

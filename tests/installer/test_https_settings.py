@@ -2,6 +2,7 @@
 import contextlib
 import io
 import json
+import os
 from pathlib import Path
 import sys
 import tarfile
@@ -22,6 +23,23 @@ TLS={'format':1,'hostname':'fixture.duckdns.org'}
 
 
 class HttpsLifecycleTests(unittest.TestCase):
+    def test_pending_cutover_blocks_all_regular_lifecycle_reads_and_recovery_is_explicit(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root=Path(tmp);config=root/'config';config.mkdir();unit=root/'app.service';unit.write_text('prior unit')
+            state={'format':1,'managed_by':'studio-installer','phase':'ready','current':'a'*40+'-'+'b'*16+'-'+'c'*8,
+                   'port':3000,'https_pending':True,'unit_sha256':'old-checksum','https':TLS}
+            path=config/'state.json';path.write_text(json.dumps(state));os.chmod(path,0o600)
+            original=Path.lstat
+            def root_owned(p):
+                value=original(p)
+                return SimpleNamespace(st_mode=value.st_mode,st_uid=0,st_nlink=value.st_nlink)
+            with patch.object(remote,'CONFIG',config),patch.object(remote,'UNIT',unit),patch.object(Path,'lstat',root_owned):
+                for kwargs in ({},{'allow_pending':True}):
+                    with self.assertRaisesRegex(remote.InstallError,'HTTPS_TRANSACTION_PENDING'):remote.load_state(**kwargs)
+                self.assertEqual(remote.load_state(allow_https_pending=True),state)
+                state['https_pending']=False;path.write_text(json.dumps(state))
+                with self.assertRaisesRegex(remote.InstallError,'UNIT_CHANGED_OUTSIDE_INSTALLER'):remote.load_state(allow_https_pending=True)
+
     def test_snapshot_records_https_metadata_but_no_keys_or_environment(self):
         with tempfile.TemporaryDirectory() as tmp:
             host=FakeHost(Path(tmp));host.state['https']=TLS;stream=io.BytesIO()
