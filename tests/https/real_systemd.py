@@ -6,6 +6,9 @@ issuer are CI fixtures. Browser SQL uses a /tmp/studio-server-ui-* database,
 NEVER a literal production data path. No TLS verification bypass is used.
 """
 import argparse
+import contextlib
+import io
+from unittest.mock import patch
 import copy
 import hashlib
 import importlib.util
@@ -15,6 +18,7 @@ from pathlib import Path
 import secrets
 import shutil
 import socket
+import signal
 import ssl
 import subprocess
 import sys
@@ -123,6 +127,31 @@ def main():
     def emit(phase,**fields):print('CI_HTTPS_'+phase.replace('-','_').upper(),flush=True)
     try:
         ci.apply(args.archive,args.version)
+        # Exercise the actual entry + full snapshot, unlike the TLS apply
+        # adapter below. Only ambient CI firewall/address/ACME admission is a
+        # fixture; systemd, ownership, sockets, health and API are real reads.
+        def check_read(name,port):
+            if name=='interfaces':return 'ok','[{"addr_info":[{"local":"8.8.8.8"}]}]'
+            if name=='ufw':return 'ok','Status: inactive\n'
+            if name=='nft':return 'ok','{"nftables":[]}'
+            if name in ('ip4','ip6','legacy4','legacy6'):return 'ok',''
+            return inventory.read(name,port)
+        def check_snapshot(*a,**kw):return inventory.snapshot(*a,**kw,run=check_read,outbound=lambda:None)
+        before_check=(I.UNIT.read_bytes(),(I.CONFIG/'state.json').read_bytes(),(I.CONFIG/'server.env').read_bytes())
+        saved_umask=os.umask(0o077);os.umask(saved_umask)
+        saved_signals={sig:signal.getsignal(sig) for sig in (signal.SIGHUP,signal.SIGTERM,signal.SIGINT)}
+        try:
+            with patch.object(host,'snapshot',side_effect=check_snapshot),contextlib.redirect_stdout(io.StringIO()) as check_log:
+                code=host.entry({'server_ip':'8.8.8.8','additional_ip':'','hostname':hostname,'mode':'check','confirmation':'','nonce':nonce})
+        finally:
+            os.umask(saved_umask)
+            for sig,handler in saved_signals.items():signal.signal(sig,handler)
+        result=[json.loads(line) for line in check_log.getvalue().splitlines()]
+        assert code==0 and result[-1]['status']=='CHECK_CANDIDATE_ACTIVE_PROOF_REQUIRED','REAL_READONLY_ENTRY_FAILED'
+        assert any(e.get('phase')=='CHECK_API' for e in result)
+        assert before_check==(I.UNIT.read_bytes(),(I.CONFIG/'state.json').read_bytes(),(I.CONFIG/'server.env').read_bytes())
+        assert not host.TRANSACTION.exists() and not host.OWNER.exists()
+        print('REAL_READONLY_CHECK_OK: full entry/snapshot, real systemd/listener/health/API; managed files unchanged',flush=True)
         canary_directory.mkdir(mode=0o700);(canary_directory/'private.conf').write_text('synthetic VPN fixture, not a real configuration')
         os.chmod(canary_directory/'private.conf',0o600)
         canary.write_text('[Unit]\nDescription=CI UDP VPN neighbor\n[Service]\nExecStart=/usr/bin/python3 -c "import socket,time;s=socket.socket(socket.AF_INET,socket.SOCK_DGRAM);s.bind((\'127.0.0.1\',443));time.sleep(2400)"\n')
