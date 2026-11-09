@@ -105,6 +105,15 @@ class DnsTests(unittest.TestCase):
                 with self.assertRaisesRegex(checks.HttpsError,'^DNS_GOOGLE_HOST_CAA_'+code+'$'):probe.query('GOOGLE','HOST',HOST,257)
                 self.assertEqual(len(calls),count);self.assertNotIn(CANARY,checks.dns_report(rows))
 
+    def test_retry_after_is_honored_or_no_retry_is_sent(self):
+        for header,calls,wait in (("3",2,3),("120",1,None),("invalid",1,None)):
+            fetch=Mock(side_effect=urllib.error.HTTPError("https://dns.google/resolve",429,CANARY,{"Retry-After":header},None))
+            sleep=Mock();probe=checks.DnsQueries(fetch,sleep=sleep)
+            with self.assertRaisesRegex(checks.HttpsError,"HTTP_429"):probe.query("GOOGLE","HOST",HOST,257)
+            self.assertEqual(fetch.call_count,calls)
+            if wait is None:sleep.assert_not_called()
+            else:sleep.assert_called_once_with(wait)
+
     def test_dns_rcodes_and_malformed_responses_are_not_nodata(self):
         cases=[({'Status':3},'NXDOMAIN'),({'Status':5},'REFUSED'),({'Status':4},'NOTIMP'),
                ({},'STATUS_MISSING'),({'Status':True},'STATUS_INVALID'),({'Status':None},'STATUS_INVALID'),

@@ -105,7 +105,7 @@ class DnsQueries:
         for attempt in range(1, self.attempts + 1):
             row = {"resolver": provider, "scope": scope, "type": KINDS[kind], "attempt": attempt,
                    "use": "REQUIRED" if required else "DIAGNOSTIC", "http": "NOT_RECEIVED", "dns": "NOT_RECEIVED", "answer": "NOT_RECEIVED"}
-            retry = False
+            retry = False; delay = 1
             try:
                 require(time.monotonic() < self.end, "TOTAL_TIMEOUT")
                 data, _ = self.fetch(endpoint + "?" + urllib.parse.urlencode({"name": name, "type": kind}), "application/dns-json")
@@ -140,6 +140,12 @@ class DnsQueries:
             except urllib.error.HTTPError as error:
                 reason = "HTTP_" + str(error.code) if type(error.code) is int and 100 <= error.code <= 599 else "HTTP_ERROR"
                 row["http"] = reason; retry = type(error.code) is int and (error.code == 429 or 500 <= error.code <= 599)
+                if retry and error.headers and error.headers.get("Retry-After"):
+                    try:
+                        raw = error.headers["Retry-After"]
+                        delay = max(1, int(raw) if raw.isascii() and raw.isdigit() else email.utils.parsedate_to_datetime(raw).timestamp() - time.time())
+                        if delay > 5: retry = False  # Do not retry earlier than the server allows.
+                    except (ValueError, TypeError, OverflowError): retry = False
             except (TimeoutError, socket.timeout): reason = "TIMEOUT"; retry = True
             except urllib.error.URLError as error:
                 if isinstance(error.reason, (TimeoutError, socket.timeout)): reason = "TIMEOUT"; retry = True
@@ -151,9 +157,9 @@ class DnsQueries:
                 reason = str(error) if str(error) in {"TOTAL_TIMEOUT", "JSON_NOT_OBJECT", "STATUS_MISSING", "STATUS_INVALID", "TRUNCATION_INVALID", "TRUNCATED", "QUESTION_MISMATCH", "ANSWER_NULL", "ANSWER_NOT_ARRAY", "ANSWER_LIMIT", "DNS_ALIAS_OR_UNEXPECTED_ANSWER", "HTTP_STATUS_UNEXPECTED", "RESPONSE_TOO_LARGE", "REDIRECT_REFUSED", *RCODES.values()} or re.fullmatch(r"RCODE_[0-9]{1,4}", str(error)) else "UNEXPECTED_RESPONSE"
             except Exception: reason = "UNEXPECTED_RESPONSE"
             row["result"] = reason; self.rows.append(row)
-            if not retry or attempt == self.attempts or time.monotonic() + 1 >= self.end:
+            if not retry or attempt == self.attempts or time.monotonic() + delay >= self.end:
                 failure = HttpsError(prefix + reason); self.cache[key] = failure; raise failure from None
-            self.sleep(1)
+            self.sleep(delay)
 
     def verify(self, host, expected):
         try:
