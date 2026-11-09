@@ -47,6 +47,8 @@ def packet(name,kind,cd=False,rd=True,edns=True):
 def parse(raw):
     if len(raw)<12:raise ValueError('SHORT_DNS')
     ident,flags,qd,an,ns,ar=struct.unpack_from('!6H',raw)
+    if not flags&0x8000 or (flags>>11)&15:raise ValueError('NOT_A_DNS_RESPONSE')
+    extended_rcode=0
     def name(pos):
         parts=[];end=None;seen=set()
         for _ in range(80):
@@ -80,6 +82,7 @@ def parse(raw):
                 tag=data[2:2+data[1]].decode('ascii',errors='replace');value=data[2+data[1]:].decode(errors='replace')
                 item.update(flags=data[0],tag=tag if re.fullmatch('[A-Za-z0-9]{1,15}',tag) else 'INVALID',issuer_le=value.split(';')[0].strip()=='letsencrypt.org',parameters_present=';' in value)
             elif kind==41:
+                extended_rcode=(ttl>>24)&255
                 at=0
                 while at+4<=len(data):
                     option,size=struct.unpack_from('!HH',data,at);at+=4
@@ -88,7 +91,7 @@ def parse(raw):
                         code=int.from_bytes(data[at:at+2],'big');errors.append({'code':code,'name':EDE.get(code,'OTHER_CODE'),**safe_detail(data[at+2:at+size].decode(errors='replace'))})
                     at+=size
             records.append(item);pos=end
-    return {'id':ident,'rcode':flags&15,'ad':bool(flags&32),'cd':bool(flags&16),'aa':bool(flags&0x400),'tc':bool(flags&0x200),'ede':errors,'questions':questions,'records':records}
+    return {'id':ident,'rcode':(flags&15)|(extended_rcode<<4),'ad':bool(flags&32),'cd':bool(flags&16),'aa':bool(flags&0x400),'tc':bool(flags&0x200),'ede':errors,'questions':questions,'records':records}
 
 
 def http(url,accept):
@@ -105,6 +108,7 @@ def ask(name,kind,provider,cd=False,transport='DOH',address=None,rd=True,edns=Tr
     try:
         q=packet(name,kind,cd,rd,edns)
         if transport=='DOH':
+            q=b'\0\0'+q[2:]  # RFC 8484 recommends zero ID for DoH caching.
             url=DOH[provider]+'?dns='+base64.urlsafe_b64encode(q).rstrip(b'=').decode()
             raw=http(url,'application/dns-message')
         else:
