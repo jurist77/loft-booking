@@ -21,7 +21,7 @@ HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE.parent / "installer"))
 from deploy import SSH, DeployError, SAFE_CODES
 from configuration import inputs
-from checks import HttpsError, require, dns_records, https_health, closed, port_challenge
+from checks import HttpsError, require, dns_records, https_health, closed, port_challenge, dns_report
 from artifacts import RELEASE, download
 
 SAFE_REMOTE_CODES = SAFE_CODES | {node.value for name in ("host", "inventory", "checks", "configuration")
@@ -157,10 +157,10 @@ class Session:
                 if not failure and self.child.returncode != 0: raise HttpsError("SSH_EXIT_AFTER_RESULT_CHECK_AGAIN")
 
 
-def verifier(normalized, nonce):
+def verifier(normalized, nonce, diagnostics=None):
     host, addresses = normalized["hostname"], normalized["addresses"]
     def verify(phase, event):
-        dns_records(host, addresses)
+        dns_records(host, addresses, diagnostics=diagnostics)
         if phase == "ports-probe":
             for address in addresses:
                 for port in (80, 443): port_challenge(address, port, nonce)
@@ -186,22 +186,23 @@ def verified_main():
 
 
 def main():
+    diagnostics = []
     try:
         with open(os.environ["GITHUB_EVENT_PATH"]) as event: raw = json.load(event).get("inputs", {})
         raw = {k: raw.get(k, "") for k in ("server_ip", "additional_ip", "hostname", "mode", "confirmation")}
         normalized = inputs(raw)
         password = os.environ.get("STUDIO_SSH_PASSWORD", ""); require(bool(password), "STUDIO_SSH_PASSWORD_MISSING")
         for value in [normalized["hostname"], *normalized["addresses"]]: print("::add-mask::" + value)
-        verified_main(); dns_records(normalized["hostname"], normalized["addresses"])
+        verified_main(); dns_records(normalized["hostname"], normalized["addresses"], diagnostics=diagnostics)
         nonce = secrets.token_hex(32)
         options = {**raw, "nonce": nonce}
         ssh = SSH(normalized["addresses"][0], password)
-        checked = Session(ssh).run({**options, "mode": "check"}, verify=verifier(normalized, nonce))
+        checked = Session(ssh).run({**options, "mode": "check"}, verify=verifier(normalized, nonce, diagnostics))
         if normalized["mode"] == "check": result = checked
         else:
             with tempfile.TemporaryDirectory(prefix="studio-caddy-") as tmp:
                 archive = download(checked["arch"], Path(tmp) / "caddy.tar.gz")
-                result = Session(ssh).run(options, archive.read_bytes(), verifier(normalized, nonce))
+                result = Session(ssh).run(options, archive.read_bytes(), verifier(normalized, nonce, diagnostics))
         message = json.dumps(result, sort_keys=True)
         print(message)
         if os.environ.get("GITHUB_STEP_SUMMARY"):
@@ -214,6 +215,10 @@ def main():
         if os.environ.get("GITHUB_STEP_SUMMARY"):
             with open(os.environ["GITHUB_STEP_SUMMARY"], "a") as out: out.write("## Studio HTTPS — FAILED\n\nSafe code: `"+code+"`. No success claimed. On transport loss run check after the recovery timer; never force an HTTP downgrade.\n")
         return 1
+
+    finally:
+        if diagnostics and os.environ.get("GITHUB_STEP_SUMMARY"):
+            with open(os.environ["GITHUB_STEP_SUMMARY"], "a") as output: output.write(dns_report(diagnostics))
 
 
 if __name__ == "__main__": raise SystemExit(main())
