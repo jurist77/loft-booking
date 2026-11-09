@@ -10,6 +10,8 @@ import json
 import os
 import re
 import secrets
+import shutil
+import subprocess
 import socket
 import struct
 import time
@@ -30,8 +32,14 @@ ROWS=[]
 
 def safe_detail(text):
     value=text.lower()
-    tokens=[label for word,label in (('dnssec','DNSSEC'),('notimp','NOTIMP'),('refused','REFUSED'),('timeout','TIMEOUT'),('timed out','TIMEOUT'),('no reachable','NO_REACHABLE_AUTHORITY'),('network error','NETWORK_ERROR'),('validation failure','VALIDATION_FAILURE'),('invalid data','INVALID_DATA'),('format error','FORMAT_ERROR')) if word in value]
-    return {'classes':sorted(set(tokens)) or ['UNCLASSIFIED'],'text_sha256':hashlib.sha256(text.encode()).hexdigest()[:16]}
+    tokens=[label for word,label in (('dnssec','DNSSEC'),('notimp','NOTIMP'),('refused','REFUSED'),('timeout','TIMEOUT'),('timed out','TIMEOUT'),('no reachable','NO_REACHABLE_AUTHORITY'),('network error','NETWORK_ERROR'),('validation failure','VALIDATION_FAILURE'),('invalid data','INVALID_DATA'),('format error','FORMAT_ERROR'),('no relevant','NO_RELEVANT_ANSWER'),('irrelevant','IRRELEVANT_ANSWER'),('lame','LAME_DELEGATION')) if word in value]
+    # EDE is public DNS diagnostic data, but remove address/URL/email strings.
+    redacted=re.sub(r"\b(?:[0-9]{1,3}\.){3}[0-9]{1,3}\b","<IP>",text)
+    redacted=re.sub(r"(?<![A-Za-z0-9])(?:[0-9a-fA-F]{0,4}:){2,}[0-9a-fA-F:.]*","<IP>",redacted)
+    redacted=re.sub(r"https?://\S+","<URL>",redacted)
+    redacted=re.sub(r"[A-Za-z0-9_.+-]+@[A-Za-z0-9_.-]+","<EMAIL>",redacted)
+    redacted=re.sub(r"[^ -~]","?",redacted)[:700]
+    return {'classes':sorted(set(tokens)) or ['UNCLASSIFIED'],'text_sha256':hashlib.sha256(text.encode()).hexdigest()[:16],'redacted_text':redacted}
 
 
 def packet(name,kind,cd=False,rd=True,edns=True):
@@ -110,7 +118,11 @@ def ask(name,kind,provider,cd=False,transport='DOH',address=None,rd=True,edns=Tr
         if transport=='DOH':
             q=b'\0\0'+q[2:]  # RFC 8484 recommends zero ID for DoH caching.
             url=DOH[provider]+'?dns='+base64.urlsafe_b64encode(q).rstrip(b'=').decode()
-            raw=http(url,'application/dns-message')
+            if provider=='QUAD9':
+                result=subprocess.run(['curl','--http2','--silent','--max-time','6','--header','Accept: application/dns-message','--write-out','\n%{http_code}',url],capture_output=True,timeout=8)
+                raw,_,status=result.stdout.rpartition(b'\n')
+                if result.returncode or status!=b'200' or len(raw)>65536:raise ValueError('QUAD9_DOH_HTTP2_FAILED')
+            else:raw=http(url,'application/dns-message')
         else:
             ip=ipaddress.ip_address(address)
             if not ip.is_global:raise ValueError('NONPUBLIC_DNS_TARGET')
@@ -188,6 +200,28 @@ def main():
             with ThreadPoolExecutor(max_workers=4) as pool:
                 futures=[pool.submit(ask,name,kind,'AUTH:'+server,False,transport,address,False,edns) for name,kind in ((host,257),('duckdns.org',48)) for transport,edns in (('UDP',True),('TCP',True),('UDP',False),('TCP',False))]
                 for future in futures:emit(future.result(),expected)
+    # Independent system dig parser, when already installed (never install).
+    dig=shutil.which('dig')
+    for server in ns[:1]+ns[-1:]:
+        if not dig:print('DIG_NOT_INSTALLED',flush=True);break
+        for tcp in (False,True):
+            result=subprocess.run([dig,'@'+server,host,'CAA','+time=2','+tries=1','+noall','+comments','+answer',*(['+tcp'] if tcp else [])],capture_output=True,text=True,timeout=5)
+            status=re.search(r'status: ([A-Z]+)',result.stdout)
+            rrtypes=[line.split()[3] for line in result.stdout.splitlines() if line and not line.startswith(';') and len(line.split())>=5]
+            print(json.dumps({'independent_tool':'dig','ns':server,'transport':'TCP' if tcp else 'UDP','exit':result.returncode,'status':status[1] if status else 'NO_DNS_REPLY','answer_types':rrtypes}),flush=True)
+    # Verify the parent delegation directly, and sample other names at two NS.
+    parent=ask('org',2,'GOOGLE');orgns=[r['name'].rstrip('.') for r in parent.get('_records',[]) if r.get('type')=='NS' and r['section']=='ANSWER']
+    for server in orgns[:1]:
+        addr=ask(server,1,'GOOGLE');ips=[r['_address'] for r in addr.get('_records',[]) if r.get('_address')]
+        for address in ips[:1]:
+            for transport in ('UDP','TCP'):emit(ask('duckdns.org',43,'PARENT:'+server,False,transport,address,False,True),expected)
+    for server in ns[:1]+ns[-1:]:
+        addr=ask(server,1,'GOOGLE');ips=[r['_address'] for r in addr.get('_records',[]) if r.get('_address')]
+        for address in ips[:1]:
+            for name in ('test.duckdns.org','demo.duckdns.org'):emit(ask(name,257,'AUTH_SAMPLE:'+server,False,'UDP',address,False,True),expected)
+    # A possible free replacement provider is inspected, never registered/used.
+    for provider in ('GOOGLE','CLOUDFLARE','OPENDNS'):
+        for kind in (43,257):emit(ask('dynv6.net',kind,provider),expected)
     if os.environ.get('GITHUB_STEP_SUMMARY'):
         with open(os.environ['GITHUB_STEP_SUMMARY'],'a') as stream:
             stream.write('## Read-only DNS investigation\n\nCD=1 is diagnostics only and NEVER grants readiness. No SSH/Secrets/VPS/ACME/DNS UPDATE/apply. No production security policy changed.\n\n```json\n'+json.dumps(ROWS,indent=2)+'\n```\n')
