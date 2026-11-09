@@ -11,6 +11,7 @@ from rules import empty_tables, saved_tables, Unsafe
 from bindings import listener_records, listener_ownership, studio_owns
 from configuration import SERVICE, UNIT_DIR
 from checks import require, HttpsError, acme_ready
+from probe_studio_network import LIMIT
 
 COMMANDS = {
     "service": ("systemctl", "show", I.SERVICE, "--property=LoadState", "--property=ActiveState", "--property=SubState", "--property=MainPID", "--property=FragmentPath", "--property=DropInPaths"),
@@ -79,7 +80,57 @@ def own_unit(raw, expected):
     require(fields.get("FragmentPath") == str(expected) and fields.get("DropInPaths") == "", "UNIT_SHADOW_OR_DROPIN_REQUIRES_REVIEW")
 
 
-def snapshot(state, addresses, managed_tls=False, run=read, outbound=acme_ready, allow_stopped=False, progress=None):
+def check_interfaces(status, raw, addresses, report=None):
+    """Parse fixed `ip -j address show scope global`; never return raw data.
+
+    iproute2 opens an addr_info object before scope filtering, so filtered
+    records can be exactly {}. Only these placeholders are ignored; a nonempty
+    incomplete record is invalid. Absence of an address does not prove NAT.
+    """
+    def fail(result, reason):
+        if report: report(result, reason)
+        raise HttpsError(result)
+    if status != "ok":
+        reason = {"missing": "COMMAND_MISSING", "timeout": "COMMAND_TIMEOUT", "output_limit": "OUTPUT_LIMIT"}.get(status, "COMMAND_ERROR") if type(status) is str else "COMMAND_ERROR"
+        fail("INTERFACE_READ_FAILED", reason)
+    if type(raw) is not str or len(raw) > LIMIT:
+        fail("INTERFACE_DATA_INVALID", "RAW_TYPE_OR_SIZE_INVALID")
+    def reject_constant(value): raise ValueError()
+    try: interfaces = json.loads(raw, parse_constant=reject_constant)
+    except (ValueError, RecursionError): fail("INTERFACE_DATA_INVALID", "JSON_INVALID")
+    if type(interfaces) is not list: fail("INTERFACE_DATA_INVALID", "ROOT_NOT_ARRAY")
+    public = set(); filtered = False
+    for interface in interfaces:
+        if type(interface) is not dict: fail("INTERFACE_DATA_INVALID", "INTERFACE_NOT_OBJECT")
+        if type(interface.get("addr_info")) is not list: fail("INTERFACE_DATA_INVALID", "ADDR_INFO_NOT_ARRAY")
+        for info in interface["addr_info"]:
+            if type(info) is not dict: fail("INTERFACE_DATA_INVALID", "ADDRESS_NOT_OBJECT")
+            if not info:
+                filtered = True
+                continue
+            if "local" not in info: fail("INTERFACE_DATA_INVALID", "LOCAL_MISSING")
+            local = info["local"]
+            if type(local) is not str or not local or len(local) > 45 or "%" in local:
+                fail("INTERFACE_DATA_INVALID", "LOCAL_TYPE_OR_FORMAT_INVALID")
+            try: value = ipaddress.ip_address(local)
+            except ValueError: fail("INTERFACE_DATA_INVALID", "ADDRESS_INVALID")
+            if "family" in info and info["family"] != ("inet" if value.version == 4 else "inet6"):
+                fail("INTERFACE_DATA_INVALID", "FAMILY_MISMATCH")
+            if "scope" in info and info["scope"] != "global": fail("INTERFACE_DATA_INVALID", "SCOPE_MISMATCH")
+            if "prefixlen" in info and (type(info["prefixlen"]) is not int or not 0 <= info["prefixlen"] <= value.max_prefixlen):
+                fail("INTERFACE_DATA_INVALID", "PREFIX_INVALID")
+            if value.is_global and not value.is_multicast and not getattr(value, "ipv4_mapped", None): public.add(value.compressed)
+    # Inputs have already passed public-literal configuration validation.
+    try:
+        if type(addresses) is not list or not 1 <= len(addresses) <= 2 or any(type(a) is not str for a in addresses): raise ValueError()
+        expected = {ipaddress.ip_address(a).compressed for a in addresses}
+    except ValueError: fail("INTERFACE_DATA_INVALID", "EXPECTED_ADDRESS_INVALID")
+    if not expected <= public: fail("PUBLIC_IP_NOT_ON_INTERFACE", "EXPECTED_ADDRESS_ABSENT")
+    if report: report("DIRECT_PUBLIC_IP_PRESENT", "FILTERED_EMPTY_ENTRIES_IGNORED" if filtered else "NONE")
+    return public
+
+
+def snapshot(state, addresses, managed_tls=False, run=read, outbound=acme_ready, allow_stopped=False, progress=None, interface_report=None):
     mark = progress or (lambda phase: None)
     mark("CHECK_PLATFORM")
     I.host_facts()
@@ -98,6 +149,7 @@ def snapshot(state, addresses, managed_tls=False, run=read, outbound=acme_ready,
         if name == "caddy" and not managed_tls: data[name] = ""; continue
         mark("READ_" + name.upper())
         status, raw = run(name, state["port"])
+        if name == "interfaces" and status != "ok": check_interfaces(status, raw, addresses, interface_report)
         require(status == "ok", "PREFLIGHT_READ_INCOMPLETE")
         data[name] = raw
     mark("CHECK_FIREWALL")
@@ -126,12 +178,7 @@ def snapshot(state, addresses, managed_tls=False, run=read, outbound=acme_ready,
                 own_listeners(selected, caddy_pid, port)
     else: require(not data["web4"].strip() and not data["web6"].strip(), "FOREIGN_80_443_LISTENER")
     mark("CHECK_INTERFACES")
-    public = set()
-    for interface in json.loads(data["interfaces"]):
-        for info in interface.get("addr_info", []):
-            value = ipaddress.ip_address(info["local"])
-            if value.is_global: public.add(value.compressed)
-    require(set(addresses) <= public, "DIRECT_PUBLIC_ADDRESSES_REQUIRED_NO_NAT_ADOPTION")
+    public = check_interfaces("ok", data["interfaces"], addresses, interface_report)
     mark("CHECK_MEMORY")
     memory = re.search(r"^MemAvailable:\s+(\d+)", I.Path("/proc/meminfo").read_text(), re.M)
     require(memory and int(memory[1]) >= 512 * 1024, "MEMORY_HEADROOM_BELOW_512_MIB")

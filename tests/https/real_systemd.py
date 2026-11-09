@@ -131,7 +131,14 @@ def main():
         # adapter below. Ambient CI root-parent metadata and network admission
         # use isolated fixtures; systemd, app ownership, sockets/HTTP are real.
         def check_read(name,port):
-            if name=='interfaces':return 'ok','[{"addr_info":[{"local":"8.8.8.8"}]}]'
+            if name=='interfaces':
+                # Preserve real iproute2 JSON (including filtered {} records).
+                # Only expected-public-address admission is a CI fixture.
+                status,raw=inventory.read(name,port)
+                if status!='ok':return status,raw
+                interfaces=json.loads(raw)
+                interfaces.append({'addr_info':[{'local':'8.8.8.8','family':'inet','scope':'global','prefixlen':32}]})
+                return status,json.dumps(interfaces)
             if name=='ufw':return 'ok','Status: inactive\n'
             if name=='nft':return 'ok','{"nftables":[]}'
             if name in ('ip4','ip6','legacy4','legacy6'):return 'ok',''
@@ -173,6 +180,8 @@ def main():
             print('CI_READONLY_FAILED code='+workflow.safe_code(last.get('code'))+' phase='+(phase if phase in REMOTE_PHASES else 'UNKNOWN')+' kind='+(kind if kind in ERROR_KINDS else 'OTHER'),flush=True)
             raise AssertionError('REAL_READONLY_ENTRY_FAILED')
         assert any(e.get('phase')=='CHECK_API' for e in result)
+        assert any(e.get('event')=='interface-result' and e.get('result')=='DIRECT_PUBLIC_IP_PRESENT' for e in result)
+        print('REAL_INTERFACE_CHECK_OK: real iproute2 JSON plus synthetic expected address; no addresses logged',flush=True)
         assert before_check==(I.UNIT.read_bytes(),(I.CONFIG/'state.json').read_bytes(),(I.CONFIG/'server.env').read_bytes())
         assert not host.TRANSACTION.exists() and not host.OWNER.exists()
         print('REAL_READONLY_CHECK_OK: full entry/snapshot, real systemd/listener/health/API; managed files unchanged',flush=True)
