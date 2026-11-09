@@ -3,7 +3,7 @@
 import json
 import os
 from configuration import inputs
-from checks import DnsQueries, PROVIDERS, HttpsError, dns_report, fetch_json
+from checks import DnsQueries, PROVIDERS, HttpsError, dns_report, fetch_json, caa_hierarchy
 
 
 def run(host, addresses, fetch=fetch_json):
@@ -13,7 +13,7 @@ def run(host, addresses, fetch=fetch_json):
     # Inspect unvisited ancestors separately for diagnosis. Their results cannot
     # override the nearest CAA RRset or a failed required hostname lookup.
     for provider,_ in PROVIDERS:
-        for scope,name in (("HOST",host),("PARENT","duckdns.org"),("TLD","org"),("ROOT",".")):
+        for scope,name in caa_hierarchy(host):
             if (provider,scope,name,257) not in probe.cache:
                 try:probe.query(provider,scope,name,257,required=False)
                 except HttpsError:pass

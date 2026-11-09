@@ -30,7 +30,7 @@ import workflow
 import monitor
 from transport_settings import https_settings, https_origin, hostname
 
-DOMAIN = 'fixture.duckdns.org'
+DOMAIN = 'fixture.dynv6.net'
 IP = '192.0.2.10'
 NONCE = 'f' * 64
 CANARY = 'SYNTHETIC_PASSWORD_PII_PRIVATE_KEY_NEVER_LOG'
@@ -120,7 +120,7 @@ class HttpsTests(unittest.TestCase):
 
     def test_input_validation_exact_confirmation_and_dual_stack(self):
         self.assertEqual(cfg.inputs({'server_ip':IP,'hostname':DOMAIN,'mode':'apply','confirmation':cfg.CONFIRMATION},fixture=True)['addresses'],[IP])
-        for change in ({'confirmation':''},{'confirmation':cfg.CONFIRMATION+' '},{'hostname':'$(bad).duckdns.org'},{'server_ip':'127.0.0.1'},{'server_ip':'https://192.0.2.10'},{'additional_ip':'192.0.2.11'},{'hostname':'example.com'}):
+        for change in ({'confirmation':''},{'confirmation':cfg.CONFIRMATION+' '},{'hostname':'$(bad).duckdns.org'},{'server_ip':'127.0.0.1'},{'server_ip':'https://192.0.2.10'},{'additional_ip':'192.0.2.11'},{'hostname':'example.com/path'}):
             with self.assertRaises(ValueError):cfg.inputs({'server_ip':IP,'hostname':DOMAIN,'mode':'apply','confirmation':cfg.CONFIRMATION,**change},fixture=True)
         self.assertEqual(len(cfg.inputs({'server_ip':IP,'additional_ip':'2001:db8::1','hostname':DOMAIN},fixture=True)['addresses']),2)
         with self.assertRaises(ValueError):cfg.inputs({'server_ip':IP,'hostname':DOMAIN})
@@ -130,7 +130,7 @@ class HttpsTests(unittest.TestCase):
         env=remote.environment_text(3100,'http://192.0.2.2:3100',TLS)
         self.assertIn('API_PUBLIC_ORIGIN=https://'+DOMAIN,env);self.assertIn('API_TRUST_PROXY=true',env);self.assertIn('API_ALLOW_INSECURE_TEST_HTTP=false',env)
         self.assertIn('--hostname 127.0.0.1',remote.service_text(Path('/opt/studio1925/releases/fixture'),3100,TLS))
-        for bad in ({'format':True,'hostname':DOMAIN},{'format':1,'hostname':'evil.com'},{'format':1,'hostname':DOMAIN,'extra':'bad'}):
+        for bad in ({'format':True,'hostname':DOMAIN},{'format':1,'hostname':'https://evil.com'},{'format':1,'hostname':DOMAIN,'extra':'bad'}):
             with self.assertRaises(ValueError):https_settings({'https':bad})
         value={'status':'SUCCESS','version':'a'*40,'port':3100,'url':'https://'+DOMAIN,'https':TLS,'health':200,'technical_acceptance':'passed','operation':'update','migrations':'verified','service':'active-enabled'}
         self.assertEqual(deploy.safe_result(value,'a'*40,IP,TLS)['https'],TLS)

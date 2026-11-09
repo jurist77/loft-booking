@@ -38,6 +38,63 @@ class DnsTests(unittest.TestCase):
     def setUp(self):
         self.sleep=patch.object(checks.time,'sleep');self.sleep.start();self.addCleanup(self.sleep.stop)
 
+    def test_provider_independent_hierarchy_includes_every_parent_and_root(self):
+        for host,names in (
+            ('fixture.dynv6.net',['fixture.dynv6.net','dynv6.net','net','.']),
+            ('booking.space.example.co.uk',['booking.space.example.co.uk','space.example.co.uk','example.co.uk','co.uk','uk','.']),
+            ('example.com',['example.com','com','.']),
+            (HOST,[HOST,'duckdns.org','org','.'])):
+            seen=[]
+            def fetch(url,*args):seen.append(query(url));return response(url)
+            self.assertTrue(checks.dns_records(host,[IP],fetch))
+            self.assertEqual([n for _,n in checks.caa_hierarchy(host)],names)
+            for provider in ('GOOGLE','CLOUDFLARE'):
+                self.assertEqual([name for p,name,k in seen if p==provider and k==257],names)
+
+    def test_intermediate_caa_cannot_be_skipped_or_overridden_by_ancestor(self):
+        host='booking.space.example.co.uk'
+        for level in [name for _,name in checks.caa_hierarchy(host)]:
+            for provider in ('GOOGLE','CLOUDFLARE'):
+                for fault in ('denied','servfail','irrelevant-a'):
+                    seen=[]
+                    def fetch(url,*args):
+                        data,headers=response(url);key=query(url);seen.append(key)
+                        if key==(provider,level,257):
+                            if fault=='servfail':data['Status']=2
+                            else:data['Answer']=[{'name':level,'type':1 if fault=='irrelevant-a' else 257,'data':IP if fault=='irrelevant-a' else '0 issue "other.example"'}]
+                        return data,headers
+                    with self.subTest(level=level,provider=provider,fault=fault),self.assertRaises(checks.HttpsError):
+                        checks.dns_records(host,[IP],fetch)
+                    self.assertTrue(any(p!=provider and k==257 for p,n,k in seen))
+
+    def test_nearest_policy_stops_required_walk_but_diagnostics_still_use_real_ancestors(self):
+        host='booking.space.example.co.uk';seen=[]
+        def fetch(url,*args):
+            data,headers=response(url);p,name,k=query(url);seen.append((p,name,k))
+            if k==257:
+                if name=='space.example.co.uk':data['Answer']=[{'name':name,'type':257,'data':'0 issue "letsencrypt.org"'}]
+                elif name=='example.co.uk':data['Status']=2
+            return data,headers
+        rows,outcome,ok=dns_check.run(host,[IP],fetch)
+        self.assertTrue(ok);self.assertEqual(outcome,'DNS_CHECK_PASSED')
+        for provider in ('GOOGLE','CLOUDFLARE'):
+            self.assertEqual([name for p,name,k in seen if p==provider and k==257],
+                             [host,'space.example.co.uk','example.co.uk','example.co.uk','co.uk','uk','.'])
+        self.assertTrue(all(r['use']=='DIAGNOSTIC' for r in rows if r.get('result')=='SERVFAIL'))
+
+    def test_dnssec_is_explicitly_enabled_and_disabled_or_malformed_cd_is_rejected(self):
+        seen=[]
+        def fetch(url,*args):
+            params=urllib.parse.parse_qs(urllib.parse.urlparse(url).query);seen.append(params)
+            return response(url)
+        self.assertTrue(checks.dns_records('fixture.dynv6.net',[IP],fetch))
+        self.assertTrue(all(p['cd']==['false'] and 'do' not in p for p in seen))
+        for cd in (True,'false',0,None):
+            def invalid(url,*args):
+                data,headers=response(url);data['CD']=cd;return data,headers
+            with self.assertRaisesRegex(checks.HttpsError,'DNSSEC_CHECKING_DISABLED'):
+                checks.dns_records('fixture.dynv6.net',[IP],invalid)
+
     def test_replay_google_host_caa_servfail_cloudflare_nodata_never_passes(self):
         seen=[];rows=[]
         def fetch(url,*args):

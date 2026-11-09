@@ -8,7 +8,7 @@ on:
         type: string
         required: true
       hostname:
-        description: "Your registered hostname.duckdns.org; A/AAAA must already be correct"
+        description: "Registered public FQDN (e.g. studio1925.dynv6.net); A/AAAA must already be correct"
         type: string
         required: true
       additional_ip:
