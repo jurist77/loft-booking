@@ -32,7 +32,7 @@ p(host,'TRANSACTION',Path(_tmp)/'transaction.json')
 state={'current':'a'*40+'-'+'b'*16+'-'+'c'*8,'phase':'ready','port':3000,'origin':'http://192.0.2.10:3000'}
 unit='LoadState=loaded\nActiveState=active\nSubState=running\nMainPID=123\nFragmentPath='+str(I.UNIT)+'\nDropInPaths=\n'
 row='LISTEN 0 511 [::]:3000 [::]:* users:(("node",pid=123,fd=20)) ino:456 sk:abc v6only:0\n'
-data={'service':unit,'sockets4':'','sockets6':row,'web4':'','web6':'','interfaces':'[{"addr_info":[{"local":"8.8.8.8"}]}]',
+data={'service':unit,'sockets4':'','sockets6':row,'web4':'','web6':'','interfaces':'[{"addr_info":[{}, {"local":"8.8.8.8"}, {}]}]',
       'ufw':'Status: inactive\n','nft':'{"nftables":[]}', 'ip4':'', 'ip6':'', 'legacy4':'', 'legacy6':''}
 def fail(*args,**kwargs):raise TypeError('SYNTHETIC_PASSWORD_PRIVATE_KEY_PERSONAL_DATA_NEVER_LOG')
 def forbidden(*args,**kwargs):raise AssertionError('UNEXPECTED_MUTATION')

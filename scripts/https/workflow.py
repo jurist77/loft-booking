@@ -23,7 +23,8 @@ from deploy import SSH, DeployError, SAFE_CODES
 from configuration import inputs
 from checks import HttpsError, require, dns_records, https_health, closed, port_challenge, dns_report
 from artifacts import RELEASE, download
-from phase_report import REMOTE_PHASES, RUNNER_PHASES, ERROR_KINDS, report as phase_report, error_kind
+from phase_report import (REMOTE_PHASES, RUNNER_PHASES, ERROR_KINDS, report as phase_report, error_kind,
+                          valid_interface_result, interface_report)
 
 SAFE_REMOTE_CODES = SAFE_CODES | {"HTTPS_BOOTSTRAP_FAILED"} | {node.value for name in ("host", "inventory", "checks", "configuration")
     for node in ast.walk(ast.parse((HERE / (name + ".py")).read_text()))
@@ -98,9 +99,10 @@ def source():
 
 
 class Session:
-    def __init__(self, ssh, limit=1000, diagnostics=None):
+    def __init__(self, ssh, limit=1000, diagnostics=None, interface_diagnostics=None):
         self.ssh, self.limit, self.child, self.buffer = ssh, limit, None, b""
         self.diagnostics = diagnostics if diagnostics is not None else []
+        self.interface_diagnostics = interface_diagnostics if interface_diagnostics is not None else []
 
     def write(self, data, timeout=120):
         end = time.monotonic() + timeout; view = memoryview(data)
@@ -131,7 +133,7 @@ class Session:
 
     def run(self, options, archive=b"", verify=None):
         require(options.get("mode") in ("check", "apply"), "INVALID_REMOTE_PROTOCOL")
-        history = []; phase_count = 0
+        history = []; phase_count = 0; interface_count = 0
         cutover = ["ports-probe", "certificate-ready", "cutover-ready"]
         code = source(); packet = json.dumps({"code_size": len(code), "archive_size": len(archive), "options": options}).encode()+b"\n"+code+archive
         try:
@@ -145,6 +147,16 @@ class Session:
                 require(time.monotonic() < end, "SSH_OPERATION_TIMEOUT_OUTCOME_UNKNOWN")
                 event = self.record(min(360, end-time.monotonic()))
                 phase = event.get("event")
+                if phase == "interface-result":
+                    interface_count += 1
+                    require(options["mode"] == "check" and interface_count == 1 and
+                            set(event) == {"event", "result", "reason"} and
+                            valid_interface_result(event.get("result"), event.get("reason")), "INVALID_REMOTE_PROTOCOL")
+                    expected_phase = "READ_INTERFACES" if event["result"] == "INTERFACE_READ_FAILED" else "CHECK_INTERFACES"
+                    require(self.diagnostics and self.diagnostics[-1] == ("REMOTE", expected_phase), "INVALID_REMOTE_PROTOCOL")
+                    self.interface_diagnostics.append((event["result"], event["reason"]))
+                    print("HTTPS_INTERFACES_" + event["result"] + ": " + event["reason"], flush=True)
+                    continue
                 if phase == "phase":
                     phase_count += 1
                     require(phase_count <= 80 and set(event) == {"event", "phase"} and
@@ -233,7 +245,7 @@ def verified_main():
 
 
 def main():
-    diagnostics = []; phases = []; runner_phase = "RUNNER_INPUT"
+    diagnostics = []; phases = []; interfaces = []; runner_phase = "RUNNER_INPUT"
     def mark(phase):
         nonlocal runner_phase
         require(phase in RUNNER_PHASES, "INVALID_CHECK_PHASE")
@@ -255,14 +267,14 @@ def main():
             mark("RUNNER_EXTERNAL_PROOF")
             verify(phase, event)
         mark("RUNNER_SSH_CHECK")
-        checked = Session(ssh, diagnostics=phases).run({**options, "mode": "check"}, verify=external_verify)
+        checked = Session(ssh, diagnostics=phases, interface_diagnostics=interfaces).run({**options, "mode": "check"}, verify=external_verify)
         if normalized["mode"] == "check": result = checked
         else:
             with tempfile.TemporaryDirectory(prefix="studio-caddy-") as tmp:
                 mark("RUNNER_ARTIFACT")
                 archive = download(checked["arch"], Path(tmp) / "caddy.tar.gz")
                 mark("RUNNER_SSH_APPLY")
-                result = Session(ssh, diagnostics=phases).run(options, archive.read_bytes(), external_verify)
+                result = Session(ssh, diagnostics=phases, interface_diagnostics=interfaces).run(options, archive.read_bytes(), external_verify)
         mark("RUNNER_RESULT")
         message = json.dumps(result, sort_keys=True)
         print(message)
@@ -282,6 +294,8 @@ def main():
         return 1
 
     finally:
+        if interfaces and os.environ.get("GITHUB_STEP_SUMMARY"):
+            with open(os.environ["GITHUB_STEP_SUMMARY"], "a") as output: output.write(interface_report(interfaces))
         if phases and os.environ.get("GITHUB_STEP_SUMMARY"):
             with open(os.environ["GITHUB_STEP_SUMMARY"], "a") as output: output.write(phase_report(phases))
         if diagnostics and os.environ.get("GITHUB_STEP_SUMMARY"):

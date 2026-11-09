@@ -353,7 +353,7 @@ def entry(options=None, archive=b"", source=""):
             progress.mark("CHECK_TRANSPORT")
             require(bool(owner and owner["committed"]) == bool(I.https_settings(state)), "HTTPS_STATE_DISAGREES")
             require(not owner or owner["hostname"] == normalized["hostname"], "HTTPS_HOSTNAME_CHANGE_REQUIRES_REVIEW")
-            facts = snapshot(state, normalized["addresses"], bool(owner and owner["committed"]), allow_stopped=True, progress=progress.mark)
+            facts = snapshot(state, normalized["addresses"], bool(owner and owner["committed"]), allow_stopped=True, progress=progress.mark, interface_report=progress.interfaces)
             progress.mark("CHECK_LOCAL_TLS")
             certificate = https_health(normalized["hostname"], "127.0.0.1") if owner and owner["committed"] and not facts["tls_stopped"] else None
             status = "CHECK_CANDIDATE_ACTIVE_PROOF_REQUIRED" if not owner or not owner["committed"] else "CHECK_MANAGED_TLS_STOPPED" if facts["tls_stopped"] else "CHECK_EXISTING_HTTPS"
