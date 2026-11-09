@@ -200,6 +200,7 @@ def main():
             # production recovery timer must restore the previous HTTP state.
             child=os.fork()
             if child==0:
+                os.umask(0o077)  # Match the actual SSH entry, not CI's 022.
                 def crash_ack(phase,value):
                     ack(phase,value)
                     if phase=='cutover-ready':os._exit(77)

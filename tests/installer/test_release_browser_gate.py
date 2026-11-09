@@ -31,6 +31,18 @@ class ReleaseBrowserGateTests(unittest.TestCase):
         self.assertIn('"Check universal installer"', check)
         self.assertIn('"MAIN_CHECKS_NOT_SUCCESSFUL"', check)
 
+    def test_exact_production_caddy_validate_is_mandatory_for_current_controls(self):
+        text=(ROOT/'.github/workflows/installer-package.yml').read_text()
+        copied=text.index('- name: Use current controls')
+        gate=text.index('- name: Require pinned Caddy validation')
+        tls=text.index('- name: Require real Caddy TLS')
+        publish=text.index('- name: Publish only the verified immutable package')
+        self.assertLess(copied,gate);self.assertLess(gate,tls);self.assertLess(tls,publish)
+        step=text[gate:tls]
+        self.assertIn('tests/https/production_validate.py',step)
+        self.assertIn('from artifacts import download',step)
+        self.assertNotIn('continue-on-error',step);self.assertNotIn('if:',step);self.assertNotIn('|| true',step)
+
     def test_https_native_browser_and_recovery_gate_is_mandatory_before_publish(self):
         text=(ROOT/'.github/workflows/installer-package.yml').read_text()
         start=text.index('- name: Require real Caddy TLS')

@@ -51,31 +51,53 @@ def main():
         # Exercise actual prepare under the entry's umask. Only host paths,
         # account creation and systemd calls are isolated; runuser/validate and
         # every mkdir/chown/chmod/atomic write are real.
-        base=root/'base';etc=root/'etc';data=root/'data';units=root/'units';units.mkdir()
         actual_run=subprocess.run
         def observed_run(argv,**kwargs):
             if argv[:3]==['runuser','-u','nobody'] and 'validate' in argv:
                 kwargs.update(stdout=subprocess.PIPE,stderr=subprocess.PIPE,text=True)
                 result=actual_run(argv,**kwargs)
                 if result.returncode:
-                    marker='VALIDATE_EXEC_PERMISSION_DENIED' if 'Permission denied' in result.stderr else 'VALIDATE_OTHER_FAILURE'
-                    print(marker,flush=True)
+                    print('VALIDATE_EXEC_PERMISSION_DENIED' if 'Permission denied' in result.stderr else 'VALIDATE_CONFIG_REJECTED',flush=True)
                 return result
             return actual_run(argv,**kwargs)
-        def commands(argv,*a,**kw):
-            assert argv[0] in ('useradd','systemctl'),'UNEXPECTED_HOST_COMMAND'
-            return ''
         original_service=cfg.service
-        with patch.object(host,'BASE',base),patch.object(host,'ETC',etc),patch.object(host,'DATA',data),patch.object(host,'OWNER',base/'managed.json'),patch.object(host,'UNIT_DIR',units),patch.object(host,'USER','nobody'),patch.object(host,'RELEASE',RELEASE),patch.object(remote,'host_facts',return_value={'arch':arch}),patch.object(remote,'run',side_effect=commands),patch.object(remote.subprocess,'run',side_effect=observed_run),patch.object(host,'service',side_effect=lambda path:original_service(cfg.BASE/'releases'/RELEASE['archives'][arch]['sha256']/'caddy')):
-            previous=os.umask(0o077)
-            try:
-                try:host.Operations('synthetic reviewed control source').prepare({'port':3000},archive,{'hostname':'fixture.dynv6.net'},None)
-                except Exception:
-                    print('PREPARE_MODES base='+oct(base.stat().st_mode&0o777)+' etc='+oct(etc.stat().st_mode&0o777)+' releases='+oct((base/'releases').stat().st_mode&0o777),flush=True)
-                    raise
-            finally:os.umask(previous)
-        assert json.loads((etc/'caddy.json').read_text())==config,'PRODUCTION_JSON_WAS_CHANGED'
-        print('PRODUCTION_PREPARE_VALIDATE_OK: umask077; separate TLS uid; exact generated JSON',flush=True)
+        for invalid in (False,True):
+            case=root/('invalid' if invalid else 'valid');case.mkdir(mode=0o755)
+            base=case/'base';etc=case/'etc';data=case/'data';units=case/'units';units.mkdir()
+            commands_seen=[]
+            def commands(argv,*a,**kw):
+                assert argv[0] in ('useradd','systemctl'),'UNEXPECTED_HOST_COMMAND'
+                commands_seen.append(argv)
+                return ''
+            def render(name,port):
+                value=cfg.caddy_config(name,port)
+                if invalid:value['studio_invalid_test_field']=True
+                return value
+            with patch.object(host,'BASE',base),patch.object(host,'ETC',etc),patch.object(host,'DATA',data),patch.object(host,'OWNER',base/'managed.json'),patch.object(host,'TRANSACTION',base/'transaction.json'),patch.object(host,'UNIT_DIR',units),patch.object(host,'USER','nobody'),patch.object(host,'RELEASE',RELEASE),patch.object(remote,'host_facts',return_value={'arch':arch}),patch.object(remote,'run',side_effect=commands),patch.object(remote.subprocess,'run',side_effect=observed_run),patch.object(host,'service',side_effect=lambda path:original_service(cfg.BASE/'releases'/RELEASE['archives'][arch]['sha256']/'caddy')):
+                previous=os.umask(0o077)
+                try:
+                    try:host.Operations('synthetic reviewed control source',config=render).prepare({'port':3000},archive,{'hostname':'fixture.dynv6.net'},None)
+                    except host.HttpsError as error:
+                        if not invalid:
+                            print('PREPARE_MODES base='+oct(base.stat().st_mode&0o777)+' etc='+oct(etc.stat().st_mode&0o777)+' releases='+oct((base/'releases').stat().st_mode&0o777),flush=True)
+                            raise
+                        assert str(error)=='CADDY_CONFIG_INVALID'
+                    else:assert not invalid,'INVALID_PRODUCTION_CONFIG_ACCEPTED'
+                finally:os.umask(previous)
+            assert base.stat().st_mode&0o777==0o755
+            assert etc.stat().st_mode&0o777==0o750
+            assert data.stat().st_mode&0o777==0o700
+            assert (base/'releases').stat().st_mode&0o777==0o755
+            assert (base/'releases'/RELEASE['archives'][arch]['sha256']).stat().st_mode&0o777==0o755
+            assert (etc/'caddy.json').stat().st_mode&0o777==0o640
+            if invalid:
+                assert not (base/'managed.json').exists() and not (base/'transaction.json').exists()
+                assert not list(units.iterdir()) and all(argv[0]!='systemctl' for argv in commands_seen)
+                print('FAILED_VALIDATE_RESIDUE_OK: staged files only; no owner/checkpoint/units/service calls',flush=True)
+            else:
+                assert json.loads((etc/'caddy.json').read_text())==config,'PRODUCTION_JSON_WAS_CHANGED'
+                assert (base/'managed.json').stat().st_mode&0o777==0o600
+                print('PRODUCTION_PREPARE_VALIDATE_OK: umask077; separate TLS uid; exact generated JSON',flush=True)
 
 
 if __name__=='__main__':main()

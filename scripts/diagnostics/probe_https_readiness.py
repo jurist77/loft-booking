@@ -41,11 +41,21 @@ HTTPS_COMMANDS = {
 }
 UNITS = ("nginx.service", "caddy.service", "apache2.service", "haproxy.service", "traefik.service",
          "certbot.service", "certbot.timer", "snap.certbot.renew.timer", "acme-sh.service", "acme-sh.timer",
-         "systemd-resolved.service", "named.service", "unbound.service", "dnsmasq.service", "ddclient.service", "duckdns.timer")
+         "systemd-resolved.service", "named.service", "unbound.service", "dnsmasq.service", "ddclient.service", "duckdns.timer",
+         "studio1925-tls.service", "studio1925-https-recover.service", "studio1925-https-recover.timer",
+         "studio1925-https-monitor.service", "studio1925-https-monitor.timer")
 TOOLS = ("nginx", "caddy", "apache2", "haproxy", "traefik", "certbot", "acme.sh", "ddclient", "openssl")
 PATHS = {"studio_config": "/etc/studio1925/server.env", "studio_unit": "/etc/systemd/system/studio1925.service",
          "studio_data": "/var/lib/studio1925", "letsencrypt": "/etc/letsencrypt", "caddy_data": "/var/lib/caddy",
-         "root_acme": "/root/.acme.sh"}
+         "root_acme": "/root/.acme.sh",
+         "studio_tls_base": "/opt/studio1925-https", "studio_tls_releases": "/opt/studio1925-https/releases",
+         "studio_tls_config": "/etc/studio1925-https", "studio_tls_data": "/var/lib/studio1925-tls",
+         "studio_tls_owner": "/opt/studio1925-https/managed.json", "studio_tls_checkpoint": "/opt/studio1925-https/transaction.json",
+         "studio_tls_unit": "/etc/systemd/system/studio1925-tls.service",
+         "studio_tls_recover_service": "/etc/systemd/system/studio1925-https-recover.service",
+         "studio_tls_recover_timer": "/etc/systemd/system/studio1925-https-recover.timer",
+         "studio_tls_monitor_service": "/etc/systemd/system/studio1925-https-monitor.service",
+         "studio_tls_monitor_timer": "/etc/systemd/system/studio1925-https-monitor.timer"}
 META = ("private", "root_owned", "unsafe", "symlink", "missing", "unknown")
 PROGRAMS = ("nginx", "caddy", "apache2", "haproxy", "traefik", "xray", "x-ui", "3x-ui", "node", "docker-proxy", "systemd")
 
