@@ -49,3 +49,6 @@ jobs:
           persist-credentials: false
       - name: Public DNS only; no secrets, SSH, VPS or apply
         run: PYTHONDONTWRITEBYTECODE=1 python3 scripts/https/dns_check.py
+      - name: Read-only public authoritative DNS evidence; no SSH or VPS
+        if: always()
+        run: PYTHONDONTWRITEBYTECODE=1 python3 scripts/diagnostics/dns_authority_readonly.py
