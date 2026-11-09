@@ -128,8 +128,8 @@ def main():
     try:
         ci.apply(args.archive,args.version)
         # Exercise the actual entry + full snapshot, unlike the TLS apply
-        # adapter below. Only ambient CI firewall/address/ACME admission is a
-        # fixture; systemd, ownership, sockets, health and API are real reads.
+        # adapter below. Ambient CI root-parent metadata and network admission
+        # use isolated fixtures; systemd, app ownership, sockets/HTTP are real.
         def check_read(name,port):
             if name=='interfaces':return 'ok','[{"addr_info":[{"local":"8.8.8.8"}]}]'
             if name=='ufw':return 'ok','Status: inactive\n'
@@ -138,15 +138,32 @@ def main():
             return inventory.read(name,port)
         def check_snapshot(*a,**kw):return inventory.snapshot(*a,**kw,run=check_read,outbound=lambda:None)
         before_check=(I.UNIT.read_bytes(),(I.CONFIG/'state.json').read_bytes(),(I.CONFIG/'server.env').read_bytes())
-        saved_umask=os.umask(0o077);os.umask(saved_umask)
-        saved_signals={sig:signal.getsignal(sig) for sig in (signal.SIGHUP,signal.SIGTERM,signal.SIGINT)}
-        try:
-            with patch.object(host,'snapshot',side_effect=check_snapshot),contextlib.redirect_stdout(io.StringIO()) as check_log:
-                code=host.entry({'server_ip':'8.8.8.8','additional_ip':'','hostname':hostname,'mode':'check','confirmation':'','nonce':nonce})
-        finally:
-            os.umask(saved_umask)
-            for sig,handler in saved_signals.items():signal.signal(sig,handler)
-        result=[json.loads(line) for line in check_log.getvalue().splitlines()]
+        def read_only_entry():
+            saved_umask=os.umask(0o077);os.umask(saved_umask)
+            saved_signals={sig:signal.getsignal(sig) for sig in (signal.SIGHUP,signal.SIGTERM,signal.SIGINT)}
+            try:
+                with patch.object(host,'snapshot',side_effect=check_snapshot),contextlib.redirect_stdout(io.StringIO()) as check_log:
+                    code=host.entry({'server_ip':'8.8.8.8','additional_ip':'','hostname':hostname,'mode':'check','confirmation':'','nonce':nonce})
+            finally:
+                os.umask(saved_umask)
+                for sig,handler in saved_signals.items():signal.signal(sig,handler)
+            return code,[json.loads(line) for line in check_log.getvalue().splitlines()]
+        # Hosted-runner /opt may deliberately be writable/non-root-owned.
+        # Do NOT relax that production guard or chmod the runner's /opt.
+        # Relocate only these three parent-metadata reads into a root-owned
+        # /tmp fixture and exercise the real validator with unsafe + safe modes.
+        real_owned=I.owned_directory
+        with tempfile.TemporaryDirectory(prefix='studio-ci-parent-permissions-') as parent_fixture:
+            parents={Path(name):Path(parent_fixture)/str(i) for i,name in enumerate(('/opt','/etc','/var/lib'))}
+            for path in parents.values():path.mkdir(mode=0o755)
+            def check_directory(path,*a,**kw):return real_owned(parents.get(Path(path),path),*a,**kw)
+            with patch.object(I,'owned_directory',side_effect=check_directory):
+                parents[Path('/opt')].chmod(0o777)
+                rejected,reject_events=read_only_entry()
+                assert rejected==1 and reject_events[-1].get('phase')=='CHECK_STORAGE' and reject_events[-1].get('code')=='UNSAFE_DIRECTORY'
+                assert before_check==(I.UNIT.read_bytes(),(I.CONFIG/'state.json').read_bytes(),(I.CONFIG/'server.env').read_bytes())
+                parents[Path('/opt')].chmod(0o755)
+                code,result=read_only_entry()
         from phase_report import REMOTE_PHASES,ERROR_KINDS
         for event in result:
             if event.get('event')=='phase' and event.get('phase') in REMOTE_PHASES:

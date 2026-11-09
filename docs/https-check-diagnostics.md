@@ -41,7 +41,9 @@ GitHub Summary содержит таблицу начатых фаз и, при 
 - Ошибки состояния, TLS owner, отдельных read-команд, health/API/ACME определяются по точной фазе и фиксированной категории. Synthetic secret canary не попадает в stdout/Summary.
 - Некорректный listener отклоняется именованным кодом; дополнительные firewall rules по-прежнему запрещены.
 - Реальный Session сохраняет phase/kind через PIPE и закрывает процесс/потоки. Неизвестные enum/лишние поля не принимаются; ACK/proof guards остаются.
-- Native Installer CI x64/ARM64 дополнен полным read-only entry/snapshot с настоящими systemd, сокетами, локальными health/API и проверкой неизменности managed state/env/unit. Только адрес/firewall/outbound admission GitHub runner — фикстура, без production SSH/DNS/ACME. Остальные TLS/browser/recovery/update/restore проверки сохранены.
+- Native Installer CI x64/ARM64 дополнен полным read-only entry/snapshot с настоящими systemd, сокетами, локальными health/API и проверкой неизменности managed state/env/unit. Только адрес/firewall/outbound admission и метаданные трёх системных родителей GitHub runner — фикстура, без production SSH/DNS/ACME. Остальные TLS/browser/recovery/update/restore проверки сохранены.
+
+Дополнительный native-тест выявил отдельное отличие GitHub runner: полный preflight вернул `CHECK_STORAGE / UNSAFE_DIRECTORY` ([run 42608813172](https://github.com/jurist77/loft-booking/actions/runs/42608813172)). Это именованный отказ проверки прав системного родителя, **не** исторический `HTTPS_OPERATION_FAILED`. Production-проверка не ослаблена: в CI только три чтения метаданных родителей перенесены на изолированные root-owned каталоги в /tmp. Настоящий валидатор сначала обязан отказать на mode 0777, затем пройти на 0755; настоящие /opt, /etc, /var/lib не изменяются. Остальные app/kernel/HTTP проверки остаются реальными.
 
 Конкретные результаты итогового SHA — в PR checks. Успешный CI доказывает исправление диагностики и регрессий на фикстурах/runner, а не устранение ещё неизвестной причины на VPS.
 
