@@ -175,7 +175,7 @@ class HttpsTests(unittest.TestCase):
         with self.assertRaisesRegex(checks.HttpsError,'DNS_ADDRESS_MISMATCH'):checks.dns_records(DOMAIN,[IP],unexpected)
         def denied(url,*args):
             data,headers=fetch(url,*args)
-            if 'type=257' in url:data['Answer']=[{'type':257,'data':'0 issue "other-ca.example"'}]
+            if 'type=257' in url:data['Answer']=[{'name':urllib.parse.parse_qs(urllib.parse.urlparse(url).query)['name'][0],'type':257,'data':'0 issue "other-ca.example"'}]
             return data,headers
         with self.assertRaisesRegex(checks.HttpsError,'CAA_DISALLOWS'):checks.dns_records(DOMAIN,[IP],denied)
 
