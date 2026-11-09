@@ -119,7 +119,9 @@ class DnsQueries:
             retry = False; delay = 1
             try:
                 require(time.monotonic() < self.end, "TOTAL_TIMEOUT")
-                data, _ = self.fetch(endpoint + "?" + urllib.parse.urlencode({"name": name, "type": kind, "cd": "false", "do": "true"}), "application/dns-json")
+                # CD controls resolver validation; DO only requests raw DNSSEC RRs.
+                # Leave DO unset so signed A answers keep the same JSON contract.
+                data, _ = self.fetch(endpoint + "?" + urllib.parse.urlencode({"name": name, "type": kind, "cd": "false"}), "application/dns-json")
                 row["http"] = "HTTP_200"
                 require(isinstance(data, dict), "JSON_NOT_OBJECT")
                 status = data.get("Status")

@@ -88,7 +88,7 @@ class DnsTests(unittest.TestCase):
             params=urllib.parse.parse_qs(urllib.parse.urlparse(url).query);seen.append(params)
             return response(url)
         self.assertTrue(checks.dns_records('fixture.dynv6.net',[IP],fetch))
-        self.assertTrue(all(p['cd']==['false'] and p['do']==['true'] for p in seen))
+        self.assertTrue(all(p['cd']==['false'] and 'do' not in p for p in seen))
         for cd in (True,'false',0,None):
             def invalid(url,*args):
                 data,headers=response(url);data['CD']=cd;return data,headers
