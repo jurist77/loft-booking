@@ -53,7 +53,7 @@ test("TLS proxy enforces Origin and overwrites spoofed client identity", async (
   const statuses: number[] = [];
   for (let i = 0; i < 12; i++) {
     const response = await page.request.post("/api/bookings", { data: {}, headers: {
-      Origin: "https://fixture.duckdns.org", "X-Studio-Client-IP": `198.51.100.${i + 1}`, "X-Forwarded-For": `203.0.113.${i + 1}`,
+      Origin: "https://fixture.dynv6.net", "X-Studio-Client-IP": `198.51.100.${i + 1}`, "X-Forwarded-For": `203.0.113.${i + 1}`,
     } });
     statuses.push(response.status());
   }
@@ -65,7 +65,7 @@ test("HTTPS headers, HTTP POST rejection and mobile width remain correct", async
   const response = await page.request.get("/");
   expect(response.headers()["strict-transport-security"]).toBe("max-age=300");
   expect(response.headers()["x-content-type-options"]).toBe("nosniff");
-  expect((await page.request.post("http://fixture.duckdns.org/api/bookings", { data: {}, maxRedirects: 0 })).status()).toBe(405);
+  expect((await page.request.post("http://fixture.dynv6.net/api/bookings", { data: {}, maxRedirects: 0 })).status()).toBe(405);
   for (const width of [320, 390, 768, 1440]) {
     await page.setViewportSize({ width, height: 900 });
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);

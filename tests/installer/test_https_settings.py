@@ -18,11 +18,26 @@ import backup
 import deploy
 from maintenance import Maintenance
 from test_maintenance import FakeHost
+from transport_settings import hostname, https_origin
 
-TLS={'format':1,'hostname':'fixture.duckdns.org'}
+TLS={'format':1,'hostname':'fixture.dynv6.net'}
 
 
 class HttpsLifecycleTests(unittest.TestCase):
+    def test_canonical_fqdn_acceptance_is_provider_independent(self):
+        for value in ('fixture.duckdns.org','fixture.dynv6.net','example.com','booking.space.example.co.uk','xn--bcher-kva.de',
+                      'a.'*125+'com'):
+            with self.subTest(value=value):
+                self.assertEqual(hostname(value),value)
+                self.assertEqual(https_origin({'format':1,'hostname':value}),'https://'+value)
+        for value in (None,True,123,'','localhost','studio.local','studio.internal','studio.onion','studio.test','studio.home.arpa',
+                      '192.0.2.10','2001:db8::1','https://example.com','example.com:443','example.com/path','example.com?x=1',
+                      'user@example.com','*.example.com','EXAMPLE.com','example.com.','example..com','-x.example.com',
+                      'x-.example.com','_x.example.com','$(bad).example.com','x.example.com\n','тест.рф','xn--.com',
+                      'a'*64+'.com','a.'*126+'com'):
+            with self.subTest(value=value),self.assertRaisesRegex(ValueError,'INVALID_HTTPS_HOSTNAME'):
+                hostname(value)
+
     def test_pending_cutover_blocks_all_regular_lifecycle_reads_and_recovery_is_explicit(self):
         with tempfile.TemporaryDirectory() as tmp:
             root=Path(tmp);config=root/'config';config.mkdir();unit=root/'app.service';unit.write_text('prior unit')
@@ -59,13 +74,13 @@ class HttpsLifecycleTests(unittest.TestCase):
             commands.assert_not_called()
 
     def test_same_version_noop_preserves_https_despite_transport_ip_argument(self):
-        state={'current':'fixture','version':'b'*40,'port':3000,'origin':'https://fixture.duckdns.org','https':TLS}
+        state={'current':'fixture','version':'b'*40,'port':3000,'origin':'https://fixture.dynv6.net','https':TLS}
         with patch.object(remote,'host_facts',return_value={'arch':'x64'}),patch.object(remote,'inspect_archive',return_value={}), \
                 patch.object(remote,'load_state',return_value=state),patch.object(remote,'managed_account',return_value=SimpleNamespace(pw_uid=11,pw_gid=11)), \
                 patch.object(remote,'owned_directory'),patch.object(remote,'private_environment',return_value=remote.environment_text(3000,https=TLS)), \
                 patch.object(remote,'health'),patch.object(remote,'api_health'),patch.object(remote,'helper'),patch.object(remote,'run') as commands:
             value=remote.install(Path('/tmp/not-read'),'a'*64,'b'*40,origin_host='192.0.2.2')
-            self.assertEqual(value['https'],TLS);self.assertEqual(value['url'],'https://fixture.duckdns.org')
+            self.assertEqual(value['https'],TLS);self.assertEqual(value['url'],'https://fixture.dynv6.net')
             self.assertEqual(value['operation'],'already-current')
             self.assertTrue(all(call.args[0][1] not in ('stop','restart') for call in commands.call_args_list))
 

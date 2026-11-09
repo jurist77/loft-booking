@@ -12,7 +12,7 @@ import time
 import urllib.error
 import urllib.parse
 import urllib.request
-from configuration import ACME
+from configuration import ACME, hostname
 try:
     from probe_studio_network import deadline
 except ModuleNotFoundError:
@@ -57,6 +57,17 @@ RCODES = {1: "FORMERR", 2: "SERVFAIL", 3: "NXDOMAIN", 4: "NOTIMP", 5: "REFUSED"}
 KINDS = {1: "A", 28: "AAAA", 257: "CAA"}
 
 
+def caa_hierarchy(host):
+    """Closest name first, then every parent through the DNS root.
+
+    No public-suffix/provider shortcut: a CAA RRset at any intermediate label
+    can govern issuance. Aliases remain unsupported and fail closed.
+    """
+    labels = hostname(host).split(".")
+    return [("HOST" if i == 0 else "TLD" if i == len(labels) - 1 else "PARENT", ".".join(labels[i:]))
+            for i in range(len(labels))] + [("ROOT", ".")]
+
+
 def dns_report(rows):
     """Only generated labels/numbers. Never names, IPs, URLs or raw errors."""
     enums = {
@@ -65,7 +76,7 @@ def dns_report(rows):
         "use": {"REQUIRED", "DIAGNOSTIC"}, "http": {"NOT_RECEIVED", "HTTP_ERROR"},
         "dns": {"NOT_RECEIVED", "STATUS_INVALID"}, "answer": {"NOT_RECEIVED", "MISSING", "EMPTY", "NULL", "RECORDS", "INVALID"},
         "result": {"NODATA", "RECORDS_RECEIVED", "IP_MATCH", "DNS_ADDRESS_MISMATCH", "CAA_ALLOWED", "CAA_NOT_CONFIRMED",
-                   "TIMEOUT", "TLS_ERROR", "TRANSPORT_ERROR", "INVALID_JSON", "HTTP_ERROR", "TOTAL_TIMEOUT", "JSON_NOT_OBJECT",
+                   "TIMEOUT", "TLS_ERROR", "TRANSPORT_ERROR", "INVALID_JSON", "HTTP_ERROR", "TOTAL_TIMEOUT", "JSON_NOT_OBJECT", "DNSSEC_CHECKING_DISABLED",
                    "STATUS_MISSING", "STATUS_INVALID", "TRUNCATION_INVALID", "TRUNCATED", "QUESTION_MISMATCH", "ANSWER_NULL",
                    "ANSWER_NOT_ARRAY", "ANSWER_LIMIT", "DNS_ALIAS_OR_UNEXPECTED_ANSWER", "HTTP_STATUS_UNEXPECTED", "RESPONSE_TOO_LARGE",
                    "REDIRECT_REFUSED", "UNEXPECTED_RESPONSE", *RCODES.values()}}
@@ -108,7 +119,7 @@ class DnsQueries:
             retry = False; delay = 1
             try:
                 require(time.monotonic() < self.end, "TOTAL_TIMEOUT")
-                data, _ = self.fetch(endpoint + "?" + urllib.parse.urlencode({"name": name, "type": kind}), "application/dns-json")
+                data, _ = self.fetch(endpoint + "?" + urllib.parse.urlencode({"name": name, "type": kind, "cd": "false", "do": "true"}), "application/dns-json")
                 row["http"] = "HTTP_200"
                 require(isinstance(data, dict), "JSON_NOT_OBJECT")
                 status = data.get("Status")
@@ -120,6 +131,7 @@ class DnsQueries:
                 if status != 0:
                     retry = status == 2
                     raise HttpsError(RCODES.get(status, "RCODE_" + str(status)))
+                require(type(data.get("CD", False)) is bool and not data.get("CD", False), "DNSSEC_CHECKING_DISABLED")
                 require(type(data.get("TC", False)) is bool, "TRUNCATION_INVALID")
                 require(not data.get("TC", False), "TRUNCATED")
                 if "Question" in data:
@@ -154,7 +166,7 @@ class DnsQueries:
             except ssl.SSLError: reason = "TLS_ERROR"
             except json.JSONDecodeError: reason = "INVALID_JSON"
             except HttpsError as error:
-                reason = str(error) if str(error) in {"TOTAL_TIMEOUT", "JSON_NOT_OBJECT", "STATUS_MISSING", "STATUS_INVALID", "TRUNCATION_INVALID", "TRUNCATED", "QUESTION_MISMATCH", "ANSWER_NULL", "ANSWER_NOT_ARRAY", "ANSWER_LIMIT", "DNS_ALIAS_OR_UNEXPECTED_ANSWER", "HTTP_STATUS_UNEXPECTED", "RESPONSE_TOO_LARGE", "REDIRECT_REFUSED", *RCODES.values()} or re.fullmatch(r"RCODE_[0-9]{1,4}", str(error)) else "UNEXPECTED_RESPONSE"
+                reason = str(error) if str(error) in {"TOTAL_TIMEOUT", "JSON_NOT_OBJECT", "STATUS_MISSING", "STATUS_INVALID", "DNSSEC_CHECKING_DISABLED", "TRUNCATION_INVALID", "TRUNCATED", "QUESTION_MISMATCH", "ANSWER_NULL", "ANSWER_NOT_ARRAY", "ANSWER_LIMIT", "DNS_ALIAS_OR_UNEXPECTED_ANSWER", "HTTP_STATUS_UNEXPECTED", "RESPONSE_TOO_LARGE", "REDIRECT_REFUSED", *RCODES.values()} or re.fullmatch(r"RCODE_[0-9]{1,4}", str(error)) else "UNEXPECTED_RESPONSE"
             except Exception: reason = "UNEXPECTED_RESPONSE"
             row["result"] = reason; self.rows.append(row)
             if not retry or attempt == self.attempts or time.monotonic() + delay >= self.end:
@@ -162,6 +174,7 @@ class DnsQueries:
             self.sleep(delay)
 
     def verify(self, host, expected):
+        hierarchy = caa_hierarchy(host)
         try:
             require(len(expected) in (1, 2), "DNS_INPUT_INVALID")
             desired = {ipaddress.ip_address(a).compressed for a in expected}
@@ -186,7 +199,7 @@ class DnsQueries:
                     self.rows.append({"resolver": provider, "scope": "HOST", "type": "ADDRESSES", "result": "DNS_ADDRESS_MISMATCH"})
                 else: self.rows.append({"resolver": provider, "scope": "HOST", "type": "ADDRESSES", "result": "IP_MATCH"})
             try:
-                for scope, name in (("HOST", host), ("PARENT", "duckdns.org"), ("TLD", "org"), ("ROOT", ".")):
+                for scope, name in hierarchy:
                     caa = self.query(provider, scope, name, 257)
                     if not caa: continue
                     issuers = []

@@ -54,7 +54,7 @@ def main():
         assert code.count(target)==1
         return code.replace(target,('DATA = Path('+repr(str(data))+')').encode())
     ci.transport.remote_source=private_source
-    hostname='fixture.duckdns.org';nonce=secrets.token_hex(32);options={'hostname':hostname,'addresses':['127.0.0.1'],'nonce':nonce}
+    hostname='fixture.dynv6.net';nonce=secrets.token_hex(32);options={'hostname':hostname,'addresses':['127.0.0.1'],'nonce':nonce}
     host.RELEASE=RELEASE
     source=workflow.source().decode();fingerprints=None
     # CI fixture only: Caddy journals contain only our synthetic hostname and

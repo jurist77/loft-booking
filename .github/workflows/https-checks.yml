@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
     inputs:
       hostname:
-        description: "Registered DuckDNS hostname; public DNS only, NO SSH/apply"
+        description: "Registered public FQDN; public DNS only, NO SSH/apply"
         type: string
         required: true
       server_ip:

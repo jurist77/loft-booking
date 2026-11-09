@@ -42,7 +42,7 @@ def main():
     binary=Path(sys.argv[1]).resolve();children=[]
     with tempfile.TemporaryDirectory(prefix='studio-https-local-') as tmp:
         root=Path(tmp);port=next(p for p in range(3150,3200) if port_available(p));tls=free_port();plain=free_port()
-        host='fixture.duckdns.org';origin=f'https://{host}:{tls}'
+        host='fixture.dynv6.net';origin=f'https://{host}:{tls}'
         env={**os.environ,'APP_MODE':'server','DEPLOY_TARGET':'node','NODE_ENV':'production','SQLITE_PATH':str(root/'test.sqlite'),
              'API_PUBLIC_ORIGIN':origin,'API_TRUST_PROXY':'true','API_ALLOW_INSECURE_TEST_HTTP':'false','NEXT_TELEMETRY_DISABLED':'1'}
         setup="import{initializeDatabase,openDatabase}from'./src/server/database.ts';import{migrate}from'./src/server/migrations.ts';const s={path:process.env.SQLITE_PATH,busyTimeout:1000};initializeDatabase(s);const d=openDatabase(s);try{await migrate(d,'migrations/sqlite')}finally{d.close()}"
