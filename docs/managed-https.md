@@ -88,3 +88,5 @@ Caddy автоматически продлевает сертификат, по
 Подробные коды и повторная DNS-only проверка: [DNS diagnostics](https-dns-diagnostics.md). SERVFAIL не означает отсутствие AAAA/CAA и не разрешает apply.
 
 Подробная безопасная диагностика read-only check, границы исторического диагноза и следующий запуск: [HTTPS check phases](https-check-diagnostics.md). Общий `HTTPS_OPERATION_FAILED` без фазы не доказывает конкретную причину на VPS.
+
+Отказ `CADDY_CONFIG_INVALID` после port proof: [воспроизведение, права каталогов и read-only проверка остатков](caddy-validate-recovery.md). Не повторять apply поверх неизвестных staged paths без отдельного согласования.

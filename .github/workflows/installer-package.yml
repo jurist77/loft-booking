@@ -89,6 +89,17 @@ jobs:
           PY
       # No real SSH connections in this PR: transport failures are mocked in
       # test_installer.py; the previous real_ssh.py is retained but not invoked.
+      - name: Require pinned Caddy validation of exact production JSON and private-umask preparation
+        run: |
+          python3 - <<'PYVALIDATE'
+          import pathlib,os,sys,platform
+          sys.path.insert(0,'scripts/https')
+          from artifacts import download
+          root=pathlib.Path(os.environ['RUNNER_TEMP'])/'studio-production-caddy'
+          root.mkdir()
+          download({'x86_64':'x64','aarch64':'arm64'}[platform.machine()],root/'caddy.tar.gz')
+          PYVALIDATE
+          sudo env STUDIO_CADDY_VALIDATE_CI=1 GITHUB_ACTIONS=true python3 tests/https/production_validate.py --archive "$RUNNER_TEMP/studio-production-caddy/caddy.tar.gz"
       - name: Browser CA tooling on disposable CI runner only
         run: |
           sudo apt-get update -qq

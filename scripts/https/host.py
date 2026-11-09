@@ -152,10 +152,17 @@ class Operations:
             I.run(["useradd", "--system", "--user-group", "--home-dir", "/nonexistent", "--no-create-home", "--shell", "/usr/sbin/nologin", USER], "TLS_USER_CREATE_FAILED")
             account = pwd.getpwnam(USER)
             I.owned_directory(BASE, mode=0o755, create=True)
+            # entry uses umask 077: mkdir(mode=...) alone would create 0700
+            # root directories and prevent the separate TLS uid from entering.
+            BASE.chmod(0o755)
             ETC.mkdir(mode=0o750); os.chown(ETC, 0, account.pw_gid)
+            ETC.chmod(0o750)
             I.owned_directory(DATA, account.pw_uid, account.pw_gid, create=True)
         release_dir = BASE / "releases" / expected
-        if not release_dir.exists(): release_dir.mkdir(parents=True, mode=0o755)
+        if not release_dir.parent.exists():
+            release_dir.parent.mkdir(mode=0o755); release_dir.parent.chmod(0o755)
+        if not release_dir.exists():
+            release_dir.mkdir(mode=0o755); release_dir.chmod(0o755)
         binary_path = release_dir / "caddy"
         if binary_path.exists(): require(not binary_path.is_symlink() and binary_path.read_bytes() == binary, "CADDY_FILE_CHANGED")
         else:

@@ -227,6 +227,22 @@ class HttpsReadinessTests(unittest.TestCase):
             self.assertEqual(probe.HTTPS_COMMANDS[key][0], "systemctl")
             self.assertIn(probe.HTTPS_COMMANDS[key][1], ("show", "list-units"))
 
+    def test_partial_tls_preparation_is_reported_by_metadata_without_reading_files(self):
+        staged={'studio_tls_base','studio_tls_releases','studio_tls_config','studio_tls_data'}
+        visited=[]
+        def inspect(path):
+            visited.append(path)
+            if path not in {probe.PATHS[key] for key in staged}:raise FileNotFoundError()
+            return SimpleNamespace(st_mode=stat.S_IFDIR|0o700,st_uid=0)
+        value=probe.mechanisms('ok','',lambda name:False,inspect)
+        for key in staged:self.assertEqual(value['paths'][key],'private')
+        for key in ('studio_tls_owner','studio_tls_checkpoint','studio_tls_unit','studio_tls_recover_timer','studio_tls_monitor_timer'):
+            self.assertEqual(value['paths'][key],'missing')
+        self.assertEqual(value['units']['studio1925-tls.service'],'not_observed')
+        self.assertEqual(value['custom_configuration'],'not_inspected')
+        self.assertEqual(set(visited),set(probe.PATHS.values()))
+        self.assertNotIn(CANARY,json.dumps(value))
+
     def test_new_command_reader_retains_output_limit_and_own_child_cleanup(self):
         base = probe.read_command.__globals__
         with patch.dict(probe.HTTPS_COMMANDS, {"fixture": (sys.executable, "-c", "print('x'*100)")}), \
