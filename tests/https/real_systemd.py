@@ -6,6 +6,9 @@ issuer are CI fixtures. Browser SQL uses a /tmp/studio-server-ui-* database,
 NEVER a literal production data path. No TLS verification bypass is used.
 """
 import argparse
+import contextlib
+import io
+from unittest.mock import patch
 import copy
 import hashlib
 import importlib.util
@@ -15,6 +18,7 @@ from pathlib import Path
 import secrets
 import shutil
 import socket
+import signal
 import ssl
 import subprocess
 import sys
@@ -123,6 +127,55 @@ def main():
     def emit(phase,**fields):print('CI_HTTPS_'+phase.replace('-','_').upper(),flush=True)
     try:
         ci.apply(args.archive,args.version)
+        # Exercise the actual entry + full snapshot, unlike the TLS apply
+        # adapter below. Ambient CI root-parent metadata and network admission
+        # use isolated fixtures; systemd, app ownership, sockets/HTTP are real.
+        def check_read(name,port):
+            if name=='interfaces':return 'ok','[{"addr_info":[{"local":"8.8.8.8"}]}]'
+            if name=='ufw':return 'ok','Status: inactive\n'
+            if name=='nft':return 'ok','{"nftables":[]}'
+            if name in ('ip4','ip6','legacy4','legacy6'):return 'ok',''
+            return inventory.read(name,port)
+        def check_snapshot(*a,**kw):return inventory.snapshot(*a,**kw,run=check_read,outbound=lambda:None)
+        before_check=(I.UNIT.read_bytes(),(I.CONFIG/'state.json').read_bytes(),(I.CONFIG/'server.env').read_bytes())
+        def read_only_entry():
+            saved_umask=os.umask(0o077);os.umask(saved_umask)
+            saved_signals={sig:signal.getsignal(sig) for sig in (signal.SIGHUP,signal.SIGTERM,signal.SIGINT)}
+            try:
+                with patch.object(host,'snapshot',side_effect=check_snapshot),contextlib.redirect_stdout(io.StringIO()) as check_log:
+                    code=host.entry({'server_ip':'8.8.8.8','additional_ip':'','hostname':hostname,'mode':'check','confirmation':'','nonce':nonce})
+            finally:
+                os.umask(saved_umask)
+                for sig,handler in saved_signals.items():signal.signal(sig,handler)
+            return code,[json.loads(line) for line in check_log.getvalue().splitlines()]
+        # Hosted-runner /opt may deliberately be writable/non-root-owned.
+        # Do NOT relax that production guard or chmod the runner's /opt.
+        # Relocate only these three parent-metadata reads into a root-owned
+        # /tmp fixture and exercise the real validator with unsafe + safe modes.
+        real_owned=I.owned_directory
+        with tempfile.TemporaryDirectory(prefix='studio-ci-parent-permissions-') as parent_fixture:
+            parents={Path(name):Path(parent_fixture)/str(i) for i,name in enumerate(('/opt','/etc','/var/lib'))}
+            for path in parents.values():path.mkdir(mode=0o755)
+            def check_directory(path,*a,**kw):return real_owned(parents.get(Path(path),path),*a,**kw)
+            with patch.object(I,'owned_directory',side_effect=check_directory):
+                parents[Path('/opt')].chmod(0o777)
+                rejected,reject_events=read_only_entry()
+                assert rejected==1 and reject_events[-1].get('phase')=='CHECK_STORAGE' and reject_events[-1].get('code')=='UNSAFE_DIRECTORY'
+                assert before_check==(I.UNIT.read_bytes(),(I.CONFIG/'state.json').read_bytes(),(I.CONFIG/'server.env').read_bytes())
+                parents[Path('/opt')].chmod(0o755)
+                code,result=read_only_entry()
+        from phase_report import REMOTE_PHASES,ERROR_KINDS
+        for event in result:
+            if event.get('event')=='phase' and event.get('phase') in REMOTE_PHASES:
+                print('CI_READONLY_PHASE_'+event['phase'],flush=True)
+        if code!=0 or result[-1]['status']!='CHECK_CANDIDATE_ACTIVE_PROOF_REQUIRED':
+            last=result[-1];phase=last.get('phase');kind=last.get('error_kind')
+            print('CI_READONLY_FAILED code='+workflow.safe_code(last.get('code'))+' phase='+(phase if phase in REMOTE_PHASES else 'UNKNOWN')+' kind='+(kind if kind in ERROR_KINDS else 'OTHER'),flush=True)
+            raise AssertionError('REAL_READONLY_ENTRY_FAILED')
+        assert any(e.get('phase')=='CHECK_API' for e in result)
+        assert before_check==(I.UNIT.read_bytes(),(I.CONFIG/'state.json').read_bytes(),(I.CONFIG/'server.env').read_bytes())
+        assert not host.TRANSACTION.exists() and not host.OWNER.exists()
+        print('REAL_READONLY_CHECK_OK: full entry/snapshot, real systemd/listener/health/API; managed files unchanged',flush=True)
         canary_directory.mkdir(mode=0o700);(canary_directory/'private.conf').write_text('synthetic VPN fixture, not a real configuration')
         os.chmod(canary_directory/'private.conf',0o600)
         canary.write_text('[Unit]\nDescription=CI UDP VPN neighbor\n[Service]\nExecStart=/usr/bin/python3 -c "import socket,time;s=socket.socket(socket.AF_INET,socket.SOCK_DGRAM);s.bind((\'127.0.0.1\',443));time.sleep(2400)"\n')

@@ -65,8 +65,11 @@ def select_port(raw, port):
 
 
 def own_listeners(data, pid, port, readlink=os.readlink):
-    records = listener_records(data, expected_port=port)
-    data["listener_ownership"] = listener_ownership(data, pid, readlink, expected_port=port)
+    try:
+        records = listener_records(data, expected_port=port)
+        data["listener_ownership"] = listener_ownership(data, pid, readlink, expected_port=port)
+    except Unsafe:
+        raise HttpsError("LISTENER_METADATA_UNCONFIRMED") from None
     require(studio_owns(records, data, pid), "LISTENER_NOT_EXCLUSIVELY_MANAGED")
     return records
 
@@ -76,27 +79,41 @@ def own_unit(raw, expected):
     require(fields.get("FragmentPath") == str(expected) and fields.get("DropInPaths") == "", "UNIT_SHADOW_OR_DROPIN_REQUIRES_REVIEW")
 
 
-def snapshot(state, addresses, managed_tls=False, run=read, outbound=acme_ready, allow_stopped=False):
-    I.host_facts(); account = I.managed_account(state)
+def snapshot(state, addresses, managed_tls=False, run=read, outbound=acme_ready, allow_stopped=False, progress=None):
+    mark = progress or (lambda phase: None)
+    mark("CHECK_PLATFORM")
+    I.host_facts()
+    mark("CHECK_IDENTITY")
+    account = I.managed_account(state)
     require(I.shutil.which("runuser", path="/usr/sbin:/usr/bin:/sbin:/bin"), "RUNUSER_REQUIRED")
+    mark("CHECK_STORAGE")
     for parent in (I.Path("/opt"), I.Path("/etc"), I.Path("/var/lib")):
         I.owned_directory(parent)
         require(I.shutil.disk_usage(parent).free >= 256 * 1024**2, "TLS_DISK_HEADROOM_REQUIRED")
+    mark("CHECK_ENVIRONMENT")
     require(state["phase"] == "ready" and not state.get("https_pending"), "STUDIO_NOT_READY")
     require(I.private_environment() == I.environment_text(state["port"], state.get("origin"), I.https_settings(state)), "ENVIRONMENT_CHANGED_OUTSIDE_INSTALLER")
     data = {}
     for name in COMMANDS:
         if name == "caddy" and not managed_tls: data[name] = ""; continue
+        mark("READ_" + name.upper())
         status, raw = run(name, state["port"])
         require(status == "ok", "PREFLIGHT_READ_INCOMPLETE")
         data[name] = raw
+    mark("CHECK_FIREWALL")
     fingerprint = empty_firewall(data)
+    mark("CHECK_SERVICE")
     service, pid = service_summary("ok", data["service"])
     own_unit(data["service"], I.UNIT)
     require(service["ActiveState"] == "active" and service["SubState"] == "running", "STUDIO_NOT_ACTIVE")
+    mark("CHECK_LISTENER")
     records = own_listeners({k: data[k] for k in ("sockets4", "sockets6")}, pid, state["port"])
     if I.https_settings(state): require(all(r["family"] == 4 and r["address"] == "127.0.0.1" for r in records), "HTTPS_BACKEND_NOT_LOOPBACK")
-    I.health(state["port"], timeout=5); I.api_health(state["port"])
+    mark("CHECK_HEALTH")
+    I.health(state["port"], timeout=5)
+    mark("CHECK_API")
+    I.api_health(state["port"])
+    mark("CHECK_TLS_LISTENER")
     stopped = False
     if managed_tls:
         service, caddy_pid = service_summary("ok", data["caddy"])
@@ -108,15 +125,19 @@ def snapshot(state, addresses, managed_tls=False, run=read, outbound=acme_ready,
                 selected = {f"sockets{f}": select_port(data[f"web{f}"], port) for f in (4, 6)}
                 own_listeners(selected, caddy_pid, port)
     else: require(not data["web4"].strip() and not data["web6"].strip(), "FOREIGN_80_443_LISTENER")
+    mark("CHECK_INTERFACES")
     public = set()
     for interface in json.loads(data["interfaces"]):
         for info in interface.get("addr_info", []):
             value = ipaddress.ip_address(info["local"])
             if value.is_global: public.add(value.compressed)
     require(set(addresses) <= public, "DIRECT_PUBLIC_ADDRESSES_REQUIRED_NO_NAT_ADOPTION")
+    mark("CHECK_MEMORY")
     memory = re.search(r"^MemAvailable:\s+(\d+)", I.Path("/proc/meminfo").read_text(), re.M)
     require(memory and int(memory[1]) >= 512 * 1024, "MEMORY_HEADROOM_BELOW_512_MIB")
+    mark("CHECK_ACME")
     outbound()
+    mark("CHECK_STABILITY")
     # No counter/queue equality claim; compare stable kernel socket identities.
     for name in ("service", "caddy", "sockets4", "sockets6", "web4", "web6"):
         if name == "caddy" and not managed_tls: continue

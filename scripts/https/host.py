@@ -26,6 +26,7 @@ from configuration import (BASE, ETC, DATA, USER, SERVICE, RECOVERY_SERVICE, REC
 from checks import require, HttpsError, https_health
 from inventory import snapshot, read, own_listeners
 from probe_studio_network import deadline
+from phase_report import Progress, error_kind, INPUT_ERROR_CODES
 
 RELEASE = None  # Injected from the checked-in immutable manifest by the bundler.
 OWNER = BASE / "managed.json"
@@ -319,7 +320,10 @@ def entry(options=None, archive=b"", source=""):
     def interrupted(_number, _frame): raise HttpsError("HTTPS_INTERRUPTED")
     for sig in (signal.SIGHUP, signal.SIGTERM, signal.SIGINT): signal.signal(sig, interrupted)
     os.umask(0o077)
+    progress = Progress(event)
+    checking = isinstance(options, dict) and options.get("mode") == "check"
     try:
+        if checking: progress.mark("CHECK_ROOT")
         require(os.geteuid() == 0, "ROOT_REQUIRED")
         if options is None:
             action = sys.argv[1] if len(sys.argv) == 2 else "invalid"
@@ -335,25 +339,34 @@ def entry(options=None, archive=b"", source=""):
                 current = owned(); require(current and current["committed"], "TLS_MONITOR_NOT_CONFIGURED")
                 https_health(current["hostname"], "127.0.0.1")
             return 0
+        if checking: progress.mark("CHECK_INPUT")
         require(isinstance(options, dict) and set(options) == {"server_ip", "additional_ip", "hostname", "mode", "confirmation", "nonce"}, "INVALID_INPUT")
         require(re.fullmatch(r"[0-9a-f]{64}", options["nonce"] or ""), "INVALID_NONCE")
         normalized = inputs({k: v for k, v in options.items() if k != "nonce"}); normalized["nonce"] = options["nonce"]
         if normalized["mode"] == "check":
+            progress.mark("CHECK_PENDING")
             require(not TRANSACTION.exists(), "PENDING_TLS_RECOVERY_REQUIRED")
+            progress.mark("CHECK_STATE")
             state = I.load_state(); require(state and state.get("current"), "STUDIO_INSTALL_REQUIRED")
+            progress.mark("CHECK_TLS_OWNER")
             owner = owned()
+            progress.mark("CHECK_TRANSPORT")
             require(bool(owner and owner["committed"]) == bool(I.https_settings(state)), "HTTPS_STATE_DISAGREES")
             require(not owner or owner["hostname"] == normalized["hostname"], "HTTPS_HOSTNAME_CHANGE_REQUIRES_REVIEW")
-            facts = snapshot(state, normalized["addresses"], bool(owner and owner["committed"]), allow_stopped=True)
+            facts = snapshot(state, normalized["addresses"], bool(owner and owner["committed"]), allow_stopped=True, progress=progress.mark)
+            progress.mark("CHECK_LOCAL_TLS")
             certificate = https_health(normalized["hostname"], "127.0.0.1") if owner and owner["committed"] and not facts["tls_stopped"] else None
             status = "CHECK_CANDIDATE_ACTIVE_PROOF_REQUIRED" if not owner or not owner["committed"] else "CHECK_MANAGED_TLS_STOPPED" if facts["tls_stopped"] else "CHECK_EXISTING_HTTPS"
+            progress.mark("CHECK_COMPLETE")
             event("result", status=status, arch=facts["arch"], changes="none", certificate=certificate, port=state["port"])
         else: apply(normalized, archive, source)
         return 0
     except BaseException as error:
-        code = error.code if isinstance(error, I.InstallError) else str(error) if isinstance(error, (HttpsError, ValueError)) else "HTTPS_OPERATION_FAILED"
+        code = error.code if isinstance(error, I.InstallError) else str(error) if isinstance(error, HttpsError) or isinstance(error, ValueError) and str(error) in INPUT_ERROR_CODES else "HTTPS_OPERATION_FAILED"
         if not re.fullmatch(r"[A-Z0-9_]+", code): code = "HTTPS_OPERATION_FAILED"
         if options is None:
             print("STUDIO_TLS_ATTENTION_" + code, flush=True)
-        else: event("result", status="FAILED", code=code)
+        else:
+            fields = {"phase": progress.phase, "error_kind": "EXPECTED" if isinstance(error, (HttpsError, I.InstallError)) else error_kind(error)} if checking and progress.phase else {}
+            event("result", status="FAILED", code=code, **fields)
         return 1

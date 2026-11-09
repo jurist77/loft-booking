@@ -23,13 +23,40 @@ from deploy import SSH, DeployError, SAFE_CODES
 from configuration import inputs
 from checks import HttpsError, require, dns_records, https_health, closed, port_challenge, dns_report
 from artifacts import RELEASE, download
+from phase_report import REMOTE_PHASES, RUNNER_PHASES, ERROR_KINDS, report as phase_report, error_kind
 
-SAFE_REMOTE_CODES = SAFE_CODES | {node.value for name in ("host", "inventory", "checks", "configuration")
+SAFE_REMOTE_CODES = SAFE_CODES | {"HTTPS_BOOTSTRAP_FAILED"} | {node.value for name in ("host", "inventory", "checks", "configuration")
     for node in ast.walk(ast.parse((HERE / (name + ".py")).read_text()))
     if isinstance(node, ast.Constant) and type(node.value) is str and re.fullmatch(r"[A-Z0-9_]{1,100}", node.value)}
 
+
+SAFE_RUNNER_CODES = SAFE_REMOTE_CODES | {node.value for path in (Path(__file__), HERE.parent / "installer/transport_settings.py")
+    for node in ast.walk(ast.parse(path.read_text()))
+    if isinstance(node, ast.Constant) and type(node.value) is str and re.fullmatch(r"[A-Z0-9_]{1,100}", node.value)}
+
+
+def safe_code(value):
+    if type(value) is not str or len(value) > 100: return "HTTPS_WORKFLOW_FAILED"
+    if value in SAFE_RUNNER_CODES: return value
+    for provider in ("GOOGLE", "CLOUDFLARE"):
+        for scope in ("HOST", "PARENT", "TLD", "ROOT"):
+            prefix = "DNS_" + provider + "_" + scope + "_"
+            if not value.startswith(prefix): continue
+            suffix = value[len(prefix):]
+            for kind in ("A_", "AAAA_", "CAA_", ""):
+                if not suffix.startswith(kind): continue
+                reason = suffix[len(kind):]
+                if reason in SAFE_RUNNER_CODES or re.fullmatch(r"HTTP_[1-5][0-9]{2}", reason) or re.fullmatch(r"RCODE_[0-9]{1,4}", reason) and int(reason[6:]) <= 4095:
+                    return value
+    return "HTTPS_WORKFLOW_FAILED"
+
 BOOTSTRAP = r'''
 import json,sys
+phase='BOOTSTRAP_HEADER'
+def mark(value):
+    global phase
+    phase=value
+    print(json.dumps({'event':'phase','phase':phase}),flush=True)
 def exact(n):
     data=sys.stdin.buffer.read(n)
     if len(data)!=n: raise ValueError()
@@ -37,29 +64,33 @@ def exact(n):
 try:
     import signal
     signal.alarm(120)
+    mark('BOOTSTRAP_HEADER')
     header=json.loads(sys.stdin.buffer.readline(8193))
     c,a=header['code_size'],header['archive_size']
     if type(c) is not int or type(a) is not int or not 0<c<500000 or not 0<=a<64*1024**2: raise ValueError()
+    mark('BOOTSTRAP_PAYLOAD')
     code=exact(c);archive=exact(a)
     signal.alarm(0)
     scope={'__name__':'__main__','_STUDIO_OPTIONS':header['options'],'_STUDIO_ARCHIVE':archive,'_STUDIO_SOURCE':code.decode()}
+    mark('BOOTSTRAP_EXEC')
     exec(compile(code,'studio-https-control','exec'),scope)
     status=scope.get('_exit',1)
 except BaseException:
-    print('{"event":"result","status":"FAILED","code":"HTTPS_BOOTSTRAP_FAILED"}',flush=True)
+    print(json.dumps({'event':'result','status':'FAILED','code':'HTTPS_BOOTSTRAP_FAILED','phase':phase,'error_kind':'OTHER'}),flush=True)
     status=1
 sys.exit(status)
 '''
 
 
 def source():
-    paths = {name: HERE.parent / "installer" / (filename + ".py") for name, filename in
-             (("transport_settings", "transport_settings"), ("backup", "backup"), ("maintenance", "maintenance"), ("studio_installer", "remote"))}
+    paths = {"phase_report": HERE / "phase_report.py"}
+    paths.update({name: HERE.parent / "installer" / (filename + ".py") for name, filename in
+             (("transport_settings", "transport_settings"), ("backup", "backup"), ("maintenance", "maintenance"), ("studio_installer", "remote"))})
     paths.update({"probe_studio_network": HERE.parent / "diagnostics/probe_studio_network.py",
                   "rules": HERE.parent / "firewall/rules.py", "bindings": HERE.parent / "firewall/bindings.py"})
     paths.update({name: HERE / (name + ".py") for name in ("configuration", "checks", "inventory", "host")})
     modules = {name: path.read_text() for name, path in paths.items()}
-    prefix = "import sys,types\nfor _name,_code in " + repr(modules) + ".items():\n _module=types.ModuleType(_name);_module.__file__='/opt/studio1925-https/'+_name+'.py';sys.modules[_name]=_module;exec(compile(_code,_name,'exec'),_module.__dict__)\n"
+    prefix = "import sys,types,json\nfor _name,_code in " + repr(modules) + ".items():\n if '_STUDIO_OPTIONS' in globals(): print(json.dumps({'event':'phase','phase':'MODULE_'+_name.upper()}),flush=True)\n _module=types.ModuleType(_name);_module.__file__='/opt/studio1925-https/'+_name+'.py';sys.modules[_name]=_module;exec(compile(_code,_name,'exec'),_module.__dict__)\n"
     prefix += "sys.modules['host'].RELEASE=" + repr(RELEASE) + "\n"
     prefix += "from host import entry\nif '_STUDIO_OPTIONS' in globals():\n _exit=entry(_STUDIO_OPTIONS,_STUDIO_ARCHIVE,_STUDIO_SOURCE)\nelse:\n sys.exit(entry())\n"
     # Don't raise SystemExit inside the framing bootstrap's broad catch.
@@ -67,7 +98,9 @@ def source():
 
 
 class Session:
-    def __init__(self, ssh, limit=1000): self.ssh, self.limit, self.child, self.buffer = ssh, limit, None, b""
+    def __init__(self, ssh, limit=1000, diagnostics=None):
+        self.ssh, self.limit, self.child, self.buffer = ssh, limit, None, b""
+        self.diagnostics = diagnostics if diagnostics is not None else []
 
     def write(self, data, timeout=120):
         end = time.monotonic() + timeout; view = memoryview(data)
@@ -98,7 +131,7 @@ class Session:
 
     def run(self, options, archive=b"", verify=None):
         require(options.get("mode") in ("check", "apply"), "INVALID_REMOTE_PROTOCOL")
-        history = []
+        history = []; phase_count = 0
         cutover = ["ports-probe", "certificate-ready", "cutover-ready"]
         code = source(); packet = json.dumps({"code_size": len(code), "archive_size": len(archive), "options": options}).encode()+b"\n"+code+archive
         try:
@@ -112,14 +145,28 @@ class Session:
                 require(time.monotonic() < end, "SSH_OPERATION_TIMEOUT_OUTCOME_UNKNOWN")
                 event = self.record(min(360, end-time.monotonic()))
                 phase = event.get("event")
+                if phase == "phase":
+                    phase_count += 1
+                    require(phase_count <= 80 and set(event) == {"event", "phase"} and
+                            type(event["phase"]) is str and event["phase"] in REMOTE_PHASES, "INVALID_REMOTE_PROTOCOL")
+                    require(options["mode"] == "check" or event["phase"].startswith(("BOOTSTRAP_", "MODULE_")), "INVALID_REMOTE_PROTOCOL")
+                    self.diagnostics.append(("REMOTE", event["phase"]))
+                    print("HTTPS_PHASE_" + event["phase"], flush=True)
+                    continue
                 require(phase in ("result", "ports-probe", "certificate-ready", "cutover-ready", "verify-existing"), "INVALID_REMOTE_PROTOCOL")
                 if phase == "result":
-                    require(set(event) <= {"event", "status", "operation", "changes", "arch", "certificate", "port", "code"}, "INVALID_REMOTE_PROTOCOL")
+                    require(set(event) <= {"event", "status", "operation", "changes", "arch", "certificate", "port", "code", "phase", "error_kind"}, "INVALID_REMOTE_PROTOCOL")
                     status = event.get("status")
                     require(status in ("FAILED", "SUCCESS", "CHECK_CANDIDATE_ACTIVE_PROOF_REQUIRED", "CHECK_EXISTING_HTTPS", "CHECK_MANAGED_TLS_STOPPED"), "INVALID_REMOTE_PROTOCOL")
                     if status == "FAILED":
+                        require(event.get("phase") is None or type(event["phase"]) is str and event["phase"] in REMOTE_PHASES, "INVALID_REMOTE_PROTOCOL")
+                        require(event.get("error_kind") is None or type(event["error_kind"]) is str and event["error_kind"] in ERROR_KINDS, "INVALID_REMOTE_PROTOCOL")
                         code = event.get("code", "")
-                        raise HttpsError(code if type(code) is str and code in SAFE_REMOTE_CODES else "REMOTE_HTTPS_FAILED")
+                        error = HttpsError(code if type(code) is str and code in SAFE_REMOTE_CODES else "REMOTE_HTTPS_FAILED")
+                        error.phase, error.error_kind = event.get("phase"), event.get("error_kind")
+                        if error.phase == "BOOTSTRAP_EXEC" and self.diagnostics and self.diagnostics[-1][0] == "REMOTE":
+                            error.phase = self.diagnostics[-1][1]
+                        raise error
                     if status == "SUCCESS":
                         required = cutover if event.get("operation") == "https-enabled" else ["verify-existing"]
                         require(options["mode"] == "apply" and history == required, "EXTERNAL_PROOF_SEQUENCE_REQUIRED")
@@ -186,23 +233,37 @@ def verified_main():
 
 
 def main():
-    diagnostics = []
+    diagnostics = []; phases = []; runner_phase = "RUNNER_INPUT"
+    def mark(phase):
+        nonlocal runner_phase
+        require(phase in RUNNER_PHASES, "INVALID_CHECK_PHASE")
+        runner_phase = phase; phases.append(("RUNNER", phase))
     try:
+        mark("RUNNER_INPUT")
         with open(os.environ["GITHUB_EVENT_PATH"]) as event: raw = json.load(event).get("inputs", {})
         raw = {k: raw.get(k, "") for k in ("server_ip", "additional_ip", "hostname", "mode", "confirmation")}
         normalized = inputs(raw)
         password = os.environ.get("STUDIO_SSH_PASSWORD", ""); require(bool(password), "STUDIO_SSH_PASSWORD_MISSING")
         for value in [normalized["hostname"], *normalized["addresses"]]: print("::add-mask::" + value)
-        verified_main(); dns_records(normalized["hostname"], normalized["addresses"], diagnostics=diagnostics)
+        mark("RUNNER_MAIN_CI"); verified_main()
+        mark("RUNNER_DNS"); dns_records(normalized["hostname"], normalized["addresses"], diagnostics=diagnostics)
         nonce = secrets.token_hex(32)
         options = {**raw, "nonce": nonce}
         ssh = SSH(normalized["addresses"][0], password)
-        checked = Session(ssh).run({**options, "mode": "check"}, verify=verifier(normalized, nonce, diagnostics))
+        verify = verifier(normalized, nonce, diagnostics)
+        def external_verify(phase, event):
+            mark("RUNNER_EXTERNAL_PROOF")
+            verify(phase, event)
+        mark("RUNNER_SSH_CHECK")
+        checked = Session(ssh, diagnostics=phases).run({**options, "mode": "check"}, verify=external_verify)
         if normalized["mode"] == "check": result = checked
         else:
             with tempfile.TemporaryDirectory(prefix="studio-caddy-") as tmp:
+                mark("RUNNER_ARTIFACT")
                 archive = download(checked["arch"], Path(tmp) / "caddy.tar.gz")
-                result = Session(ssh).run(options, archive.read_bytes(), verifier(normalized, nonce, diagnostics))
+                mark("RUNNER_SSH_APPLY")
+                result = Session(ssh, diagnostics=phases).run(options, archive.read_bytes(), external_verify)
+        mark("RUNNER_RESULT")
         message = json.dumps(result, sort_keys=True)
         print(message)
         if os.environ.get("GITHUB_STEP_SUMMARY"):
@@ -210,13 +271,19 @@ def main():
                 output.write("## Studio managed HTTPS\n\n```json\n" + message + "\n```\n\nNo production booking POST was sent. Browser/SQLite acceptance is required in CI; this run verifies live TLS, health, read-only API and backend closure.\n")
         return 0
     except BaseException as error:
-        code = str(error) if isinstance(error, (HttpsError, ValueError)) and re.fullmatch(r"[A-Z0-9_]{1,100}", str(error)) else "HTTPS_WORKFLOW_FAILED"
+        code = safe_code(str(error)) if isinstance(error, (HttpsError, ValueError)) else "HTTPS_WORKFLOW_FAILED"
         print("FAILED: " + code)
         if os.environ.get("GITHUB_STEP_SUMMARY"):
-            with open(os.environ["GITHUB_STEP_SUMMARY"], "a") as out: out.write("## Studio HTTPS — FAILED\n\nSafe code: `"+code+"`. No success claimed. On transport loss run check after the recovery timer; never force an HTTP downgrade.\n")
+            phase = getattr(error, "phase", None)
+            if type(phase) is not str or phase not in REMOTE_PHASES: phase = phases[-1][1] if phases else runner_phase
+            kind = getattr(error, "error_kind", None)
+            if type(kind) is not str or kind not in ERROR_KINDS: kind = "EXPECTED" if isinstance(error, HttpsError) else error_kind(error)
+            with open(os.environ["GITHUB_STEP_SUMMARY"], "a") as out: out.write("## Studio HTTPS — FAILED\n\nSafe code: `"+code+"`; phase: `"+phase+"`; kind: `"+kind+"`. No success claimed. On transport loss run check after the recovery timer; never force an HTTP downgrade.\n")
         return 1
 
     finally:
+        if phases and os.environ.get("GITHUB_STEP_SUMMARY"):
+            with open(os.environ["GITHUB_STEP_SUMMARY"], "a") as output: output.write(phase_report(phases))
         if diagnostics and os.environ.get("GITHUB_STEP_SUMMARY"):
             with open(os.environ["GITHUB_STEP_SUMMARY"], "a") as output: output.write(dns_report(diagnostics))
 
