@@ -147,7 +147,14 @@ def main():
             os.umask(saved_umask)
             for sig,handler in saved_signals.items():signal.signal(sig,handler)
         result=[json.loads(line) for line in check_log.getvalue().splitlines()]
-        assert code==0 and result[-1]['status']=='CHECK_CANDIDATE_ACTIVE_PROOF_REQUIRED','REAL_READONLY_ENTRY_FAILED'
+        from phase_report import REMOTE_PHASES,ERROR_KINDS
+        for event in result:
+            if event.get('event')=='phase' and event.get('phase') in REMOTE_PHASES:
+                print('CI_READONLY_PHASE_'+event['phase'],flush=True)
+        if code!=0 or result[-1]['status']!='CHECK_CANDIDATE_ACTIVE_PROOF_REQUIRED':
+            last=result[-1];phase=last.get('phase');kind=last.get('error_kind')
+            print('CI_READONLY_FAILED code='+workflow.safe_code(last.get('code'))+' phase='+(phase if phase in REMOTE_PHASES else 'UNKNOWN')+' kind='+(kind if kind in ERROR_KINDS else 'OTHER'),flush=True)
+            raise AssertionError('REAL_READONLY_ENTRY_FAILED')
         assert any(e.get('phase')=='CHECK_API' for e in result)
         assert before_check==(I.UNIT.read_bytes(),(I.CONFIG/'state.json').read_bytes(),(I.CONFIG/'server.env').read_bytes())
         assert not host.TRANSACTION.exists() and not host.OWNER.exists()
