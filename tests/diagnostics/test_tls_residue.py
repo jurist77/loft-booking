@@ -107,6 +107,11 @@ class ResidueTests(unittest.TestCase):
         (self.root/'foreign-hardlink').unlink();file.chmod(0o666);self.assertBlocked('METADATA_MISMATCH')
         file.chmod(0o644);self.base.chmod(0o755);self.assertBlocked('METADATA_MISMATCH')
 
+    def test_symlink_in_staging_parent_is_not_owned_prepare_evidence(self):
+        opt=self.root/'opt';moved=self.root/'alias-opt'
+        opt.rename(moved);opt.symlink_to('alias-opt',target_is_directory=True)
+        self.assertBlocked('METADATA_MISMATCH')
+
     def test_modified_binary_license_control_and_json_block(self):
         for path in (self.release/'caddy',self.release/'LICENSE',self.base/'control.py',self.etc/'caddy.json'):
             with self.subTest(file=path.name):

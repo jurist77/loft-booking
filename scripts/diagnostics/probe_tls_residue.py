@@ -52,6 +52,14 @@ class TlsResidueInspector:
     def path(self, name): return self.root/name.lstrip('/')
 
     def info(self, name):
+        if self.related(name):
+            # NOFOLLOW on the final open does not protect symlinked parents.
+            # The original prepare also requires canonical root-owned paths.
+            for parent in self.path(name).parents:
+                if parent==self.root:break
+                st=parent.lstat()
+                if not stat.S_ISDIR(st.st_mode) or st.st_uid!=self.root_uid or st.st_mode&0o022:
+                    self.block('METADATA_MISMATCH')
         value=self.path(name).lstat()
         if not name.startswith('/proc/') and os.listxattr(self.path(name),follow_symlinks=False):
             self.block('METADATA_MISMATCH')
