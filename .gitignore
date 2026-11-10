@@ -22,3 +22,7 @@ next-env.d.ts
 *.partial
 __pycache__/
 *.py[cod]
+
+# Protected Telegram configuration and one-use local invitation files
+telegram-bot.json
+private-invites/

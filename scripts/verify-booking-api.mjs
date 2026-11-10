@@ -1,4 +1,5 @@
-// Actual production Next.js + private real SQLite. No mocks, fixed dates or real contacts.
+// Production Next.js + private real SQLite; no booking HTTP mocks or real contacts.
+// Telegram delivery alone uses a local fake; no request reaches Telegram.
 import assert from "node:assert/strict";
 import { request as httpRequest } from "node:http";
 import { createServer } from "node:net";
@@ -11,6 +12,8 @@ import { setTimeout as delay } from "node:timers/promises";
 import { databaseSettings } from "../src/server/config.ts";
 import { initializeDatabase, openDatabase, assertIntegrity } from "../src/server/database.ts";
 import { migrate } from "../src/server/migrations.ts";
+import { acquireWorker, setTelegramEnabled } from "../src/server/telegram/model.ts";
+import { TelegramDeliveryWorker } from "../src/server/telegram/worker.ts";
 import { createBooking, cancelBooking } from "../src/server/bookings.ts";
 import { addDays, dateRange } from "../src/lib/availability.ts";
 import { waitForHealth } from "./lib/health-probe.mjs";
@@ -108,6 +111,22 @@ try {
   await check("lost HTTP reply is recovered by retrying the same ID", async () => {
     const lost = body({ date: addDays(date, 1) }); await post(lost, { loseReply: true });
     json(await post(lost), 201); assert.equal(eventCount(lost.requestId), 1);
+  });
+  await check("real HTTP lost-reply retry creates one notification, delivered only through a mock Telegram transport", async () => {
+    const stamp=Date.now();
+    db.prepare("INSERT INTO resources(id,name) VALUES ('telegram-ci','Synthetic notification resource')").run();
+    db.prepare("INSERT INTO telegram_recipients(id,display_name,telegram_user_id,chat_id,connection_status,created_at,updated_at) VALUES ('telegram-ci','Synthetic recipient','555001','555001','connected',?,?)").run(stamp,stamp);
+    setTelegramEnabled(db,true);
+    const request=body({resourceId:'telegram-ci'});
+    await post(request,{loseReply:true}); json(await post(request),201);
+    assert.equal(db.prepare('SELECT count(*) AS n FROM telegram_outbox WHERE booking_id=?').get(request.requestId).n,1);
+    let sends=0;
+    const fake={getMe:async()=>({ok:true,value:{id:123456,username:'FixtureBot'}}),getUpdates:async()=>({ok:true,value:[]}),send:async()=>{sends++;return {ok:true,value:1};}};
+    acquireWorker(db,'http-notification-fixture',Date.now());
+    await new TelegramDeliveryWorker(db,'http-notification-fixture',fake).dispatch();
+    assert.equal(sends,1);assert.equal(db.prepare('SELECT status FROM telegram_outbox WHERE booking_id=?').get(request.requestId).status,'sent');
+    json(await post(request),201);assert.equal(db.prepare('SELECT count(*) AS n FROM telegram_outbox WHERE booking_id=?').get(request.requestId).n,1);
+    for(const route of ['/api/telegram','/api/telegram/recipients','/api/telegram/invite'])assert.equal((await http(route)).status,404);
   });
   await check("concurrent POST writes and concurrent retries", async () => {
     const otherDay = addDays(date, 2);

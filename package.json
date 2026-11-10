@@ -31,7 +31,8 @@
     "db:migrate": "node --env-file-if-exists=.env.sqlite.local --conditions=react-server scripts/database.mjs migrate",
     "db:check": "node --env-file-if-exists=.env.sqlite.local --conditions=react-server scripts/database.mjs check",
     "db:backup": "node --env-file-if-exists=.env.sqlite.local --conditions=react-server scripts/database.mjs backup",
-    "db:restore": "node --env-file-if-exists=.env.sqlite.local --conditions=react-server scripts/database.mjs restore"
+    "db:restore": "node --env-file-if-exists=.env.sqlite.local --conditions=react-server scripts/database.mjs restore",
+    "telegram": "node --env-file-if-exists=.env.sqlite.local --conditions=react-server scripts/telegram.mjs"
   },
   "engines": {
     "node": "^24.0.0 || >=26.0.0"

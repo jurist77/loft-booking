@@ -6,7 +6,8 @@ import { setTimeout as delay } from "node:timers/promises";
 
 const secret = `private_demo_audit_${randomBytes(16).toString("hex")}`;
 const env = {
-  ...process.env, APP_MODE: "server",
+  ...process.env, APP_MODE: "server", STUDIO_TELEGRAM_WORKER: "1",
+  TELEGRAM_CONFIG_FILE: `/unavailable/${secret}/telegram-bot.json`, TELEGRAM_BOT_TOKEN: secret,
   SQLITE_PATH: `/unavailable/${secret}/studio.sqlite`, SQLITE_BUSY_TIMEOUT_MS: "invalid",
   API_PUBLIC_ORIGIN: `https://${secret}.invalid/path`, API_TRUST_PROXY: "invalid",
 };

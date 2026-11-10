@@ -269,6 +269,8 @@ WorkingDirectory=/app
 MountAPIVFS=true
 BindPaths={DATA}:/data {CACHE}:/app/.next-server/cache {DATA}/photos:/app/public/images
 EnvironmentFile={CONFIG}/server.env
+Environment=STUDIO_TELEGRAM_WORKER=1
+BindReadOnlyPaths=-/etc/resolv.conf:/etc/resolv.conf
 ExecStart=/usr/bin/node /app/node_modules/next/dist/bin/next start --hostname {bind} --port {port}
 Restart=on-failure
 RestartSec=5
