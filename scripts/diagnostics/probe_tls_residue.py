@@ -40,12 +40,15 @@ def tls_empty_report():
 
 class TlsResidueInspector:
     """root is only for isolated fixtures; production always uses / and /proc."""
-    def __init__(self, reference, root=Path('/'), account=pwd.getpwnam, groups=grp.getgrall, loaded='', machine=platform.machine):
+    def __init__(self, reference, root=Path('/'), account=pwd.getpwnam, groups=grp.getgrall, loaded='', machine=platform.machine,
+                 dependency_roots=TLS_ROOTS, identity_names=(TLS_USER,)):
         self.reference,self.root,self.account,self.groups=reference,root,account,groups
         self.seen={}; self.report=tls_empty_report(); self.uid=self.gid=None
         self.root_uid=0
         self.loaded=loaded
         self.machine=machine
+        self.dependency_roots=dependency_roots
+        self.identity_names=identity_names
 
     def block(self, code): raise TlsBlocked(code)
 
@@ -215,7 +218,7 @@ class TlsResidueInspector:
 
     def dependencies(self):
         def has_reference(raw):
-            if any(v in raw for v in (*TLS_ROOTS,TLS_USER,'/run/studio1925-tls',*TLS_UNIT_NAMES)):return True
+            if any(v in raw for v in (*TLS_ROOTS,*self.identity_names,'/run/studio1925-tls',*TLS_UNIT_NAMES)):return True
             for key,value in re.findall(r'(?m)^\s*(User|Group|SupplementaryGroups)[ \t]*=[ \t]*([^\n]*)$',raw):
                 if str(self.uid if key=='User' else self.gid) in value.split():return True
             return False
@@ -265,7 +268,7 @@ class TlsResidueInspector:
             visited.add(identity)
             for leaf in self.names(parent):
                 name=parent.rstrip('/')+'/'+leaf
-                if name in ('/proc','/sys','/dev') or name in TLS_ROOTS:continue
+                if name in ('/proc','/sys','/dev') or name in self.dependency_roots:continue
                 count+=1
                 if count>2000000:self.block('READ_OR_LIMIT_FAILED')
                 st=self.path(name).lstat()
@@ -307,20 +310,22 @@ class TlsResidueInspector:
         return self.report
 
 
-def audit_tls_residue(reference, run):
+def audit_tls_residue(reference, run, capture=None):
     try:
         with deadline(45):
             state,loaded=run('tls_dependencies')
             if state!='ok' or not re.search(r'^Id=studio1925\.service$',loaded,re.M):raise OSError()
             state,paths=run('tls_unit_paths')
             if state!='ok' or not paths.split() or any(not any(p.startswith(r+'/') for r in TLS_UNIT_ROOTS) for p in paths.split()):raise OSError()
-            result=TlsResidueInspector(reference,loaded=loaded).audit()
+            inspector=TlsResidueInspector(reference,loaded=loaded)
+            result=inspector.audit()
             state,after=run('tls_dependencies')
             if result['status']=='MATCHED_FAILED_PREPARE' and (state!='ok' or after!=loaded):
                 result.update(status='BLOCKED',reason='SNAPSHOT_CHANGED',preservation_required=True)
             state,after_paths=run('tls_unit_paths')
             if result['status']=='MATCHED_FAILED_PREPARE' and (state!='ok' or after_paths!=paths):
                 result.update(status='BLOCKED',reason='SNAPSHOT_CHANGED',preservation_required=True)
+            if result['status']=='MATCHED_FAILED_PREPARE' and capture is not None:capture.append(inspector)
             return result
     except (TimeoutError,OSError):
         result=tls_empty_report();result['reason']='READ_OR_LIMIT_FAILED';return result

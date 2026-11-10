@@ -1,0 +1,61 @@
+name: Quarantine failed Studio HTTPS prepare
+
+on:
+  workflow_dispatch:
+    inputs:
+      server_ip:
+        description: "VPS IPv4/IPv6. Only the proven failed prepare 42645562662"
+        required: true
+        type: string
+      mode:
+        description: "check is read-only; quarantine requires separate owner approval"
+        type: choice
+        default: check
+        options: [check, quarantine]
+      confirmation:
+        description: "For quarantine only: QUARANTINE FAILED STUDIO HTTPS PREPARE"
+        type: string
+        default: ""
+
+permissions:
+  contents: read
+
+concurrency:
+  group: studio-one-time-https-quarantine
+  cancel-in-progress: false
+
+jobs:
+  quarantine:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - name: Validate input and existing Secret before SSH
+        env:
+          STUDIO_PASSWORD_PRESENT: ${{ secrets.STUDIO_SSH_PASSWORD != '' }}
+        run: |
+          python3 -B - <<'PY'
+          import json,os,sys
+          sys.path[:0]=['scripts/https_quarantine','scripts/diagnostics','scripts/installer']
+          from quarantine_workflow import options
+          try:
+              with open(os.environ['GITHUB_EVENT_PATH']) as event: inputs=json.load(event).get('inputs',{})
+              address,mode,confirmation=options(inputs)
+              print('::add-mask::'+address)
+              if os.environ.get('STUDIO_PASSWORD_PRESENT')!='true': raise ValueError()
+          except Exception:
+              print('BLOCKED: INVALID_INPUT_OR_SECRET');sys.exit(1)
+          PY
+      - name: SSH tooling on disposable runner only
+        run: |
+          if ! command -v sshpass >/dev/null; then
+            sudo apt-get update -qq
+            sudo apt-get install -y --no-install-recommends sshpass
+          fi
+      - name: One-time check or explicitly confirmed quarantine
+        env:
+          STUDIO_SSH_PASSWORD: ${{ secrets.STUDIO_SSH_PASSWORD }}
+        run: PYTHONDONTWRITEBYTECODE=1 python3 scripts/https_quarantine/quarantine_workflow.py

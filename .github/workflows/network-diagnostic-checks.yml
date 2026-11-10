@@ -26,3 +26,7 @@ jobs:
         run: python3 -B scripts/diagnostics/build_https_residue_reference.py --verify
       - name: Fixture-only read-only and redaction checks; never run real VPS diagnostics
         run: PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s tests/diagnostics -v
+      - name: One-time quarantine isolated fixtures; no SSH or VPS actions
+        run: PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s tests/https_quarantine -v
+      - name: Native one-time account and atomic-rename acceptance on disposable CI only
+        run: sudo env STUDIO_QUARANTINE_CI=1 GITHUB_ACTIONS=true RUNNER_TEMP="$RUNNER_TEMP" PYTHONDONTWRITEBYTECODE=1 python3 tests/https_quarantine/real_identity.py
