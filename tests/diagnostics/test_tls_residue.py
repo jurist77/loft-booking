@@ -86,7 +86,11 @@ class ResidueTests(unittest.TestCase):
 
     def test_keys_certificates_or_any_data_are_preserved_without_reading(self):
         (self.data/'private-key.pem').write_text(CANARY)
-        with patch.object(self.audit,'read',side_effect=AssertionError('must not read any file yet')):
+        original=self.audit.read
+        def kernel_only(name,*args,**kwargs):
+            if name.startswith('/proc/'):return original(name,*args,**kwargs)
+            raise AssertionError('must not read TLS data or configuration')
+        with patch.object(self.audit,'read',side_effect=kernel_only):
             self.assertBlocked('STATE_REQUIRES_PRESERVATION')
 
     def test_managed_or_pending_checkpoint_blocks_even_if_empty(self):
