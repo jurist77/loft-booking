@@ -15,6 +15,10 @@ import shutil
 import stat
 from types import FunctionType
 
+if 'audit_tls_residue' not in globals():
+    from probe_tls_residue import audit_tls_residue, tls_empty_report
+    TLS_RESIDUE_REFERENCE = json.loads(Path(__file__).with_name('https-residue-reference.json').read_text())
+
 if "read_command" not in globals():
     from probe_studio_network import (COMMANDS, read_command, read_health, service_summary,
                                      ufw_summary, deadline, READ_STATES, HEALTH_ERRORS)
@@ -38,6 +42,10 @@ HTTPS_COMMANDS = {
     # All tables, including NAT; legacy and nf_tables layers can coexist.
     "iptables": ("iptables-save",), "ip6tables": ("ip6tables-save",),
     "legacy4": ("iptables-legacy-save",), "legacy6": ("ip6tables-legacy-save",),
+    "tls_dependencies": ("systemctl", "show", "*", "--property=Id", "--property=User", "--property=Group",
+        "--property=SupplementaryGroups", "--property=ExecStart", "--property=RootDirectory",
+        "--property=WorkingDirectory", "--property=FragmentPath", "--property=DropInPaths", "--property=ReadWritePaths"),
+    "tls_unit_paths": ("systemctl", "show", "--property=UnitPath", "--value"),
 }
 UNITS = ("nginx.service", "caddy.service", "apache2.service", "haproxy.service", "traefik.service",
          "certbot.service", "certbot.timer", "snap.certbot.renew.timer", "acme-sh.service", "acme-sh.timer",
@@ -200,7 +208,7 @@ def firewall_summary(name, state, raw):
 
 def collect(run=read_https, health=read_health, inspect=os.lstat, readlink=os.readlink,
             available=lambda name: shutil.which(name, path="/usr/sbin:/usr/bin:/sbin:/bin"), files=fixed_file,
-            machine=platform.machine, euid=os.geteuid, account=pwd.getpwnam):
+            machine=platform.machine, euid=os.geteuid, account=pwd.getpwnam, residue=None):
     try: release = files("/usr/lib/os-release")
     except (OSError, ValueError, UnicodeError): release = ""
     clock_state, clock = run("clock")
@@ -223,8 +231,12 @@ def collect(run=read_https, health=read_health, inspect=os.lstat, readlink=os.re
     web = {str(family): web_sockets(*run("web" + str(family)), family) for family in (4, 6)}
     unit_state, units = run("units")
     inventory = mechanisms(unit_state, units, available, inspect)
+    tls_residue = (residue or (lambda: audit_tls_residue(TLS_RESIDUE_REFERENCE, run)))()
     fresh_state, fresh_raw = run("service")
-    stable = fresh_state == state == "ok" and raw == fresh_raw
+    fresh_units_state, fresh_units = run('units')
+    fresh_health = health('127.0.0.1',3000)
+    stable = (fresh_state == state == "ok" and raw == fresh_raw and
+        fresh_units_state == unit_state == 'ok' and fresh_units == units and fresh_health == local)
     for key, value in identity.items(): stable = (run(key) == value) and stable
     return {"status": "OBSERVED", "host": host, "studio": {"service": service, "listener_owned": owned and stable,
             "snapshot_stable": stable, "bind_proof": proof if stable else "unconfirmed", "local_health": local,
@@ -233,7 +245,7 @@ def collect(run=read_https, health=read_health, inspect=os.lstat, readlink=os.re
             "managed_rootfs": bool(re.fullmatch(r"/opt/studio1925/releases/[A-Za-z0-9_.-]+/root", fields.get("RootDirectory", ""))) and fields.get("WorkingDirectory") == "/app",
             "private_network": fields.get("PrivateNetwork") if fields.get("PrivateNetwork") in ("yes", "no") else "unknown",
             "network_namespace": bool(fields.get("NetworkNamespacePath")), "drop_ins": bool(fields.get("DropInPaths"))},
-            "ports": web, "mechanisms": inventory,
+            "ports": web, "mechanisms": inventory, "tls_residue": tls_residue,
             "firewall": {name: firewall_summary(name, *run(name)) for name in ("ufw", "nft", "iptables", "ip6tables", "legacy4", "legacy6")}}
 
 

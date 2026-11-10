@@ -31,6 +31,7 @@ SOCKET = 'LISTEN 0 511 0.0.0.0:3000 0.0.0.0:* users:(("node",pid=4321,fd=4)) ino
 
 
 def fixture(overrides=None, mutate_read=None, collector=probe.collect, **kwargs):
+    kwargs.setdefault('residue', probe.tls_empty_report)
     values = {"service": "LoadState=loaded\nActiveState=active\nSubState=running\nMainPID=4321\nUser=studio1925\nRootDirectory=/opt/studio1925/releases/test/root\nWorkingDirectory=/app\nPrivateNetwork=no\nNetworkNamespacePath=\nDropInPaths=\n",
         "sockets4": SOCKET, "sockets6": "", "web4": "", "web6": "", "units": "", "clock": "status: 0\n",
         "ufw": "Status: inactive\n", "nft": '{"nftables":[{"chain":{"hook":"input","policy":"accept"}}]}'}
@@ -222,7 +223,7 @@ class HttpsReadinessTests(unittest.TestCase):
         # The only text file reader accepts the public OS metadata path.
         self.assertEqual(probe.PATHS["studio_config"], "/etc/studio1925/server.env")
         self.assertNotIn("STUDIO_SSH_PASSWORD", source)
-        self.assertEqual(set(probe.HTTPS_COMMANDS), {"service", "sockets4", "sockets6", "web4", "web6", "units", "clock", "ufw", "nft", "iptables", "ip6tables", "legacy4", "legacy6"})
+        self.assertEqual(set(probe.HTTPS_COMMANDS), {"service", "sockets4", "sockets6", "web4", "web6", "units", "clock", "ufw", "nft", "iptables", "ip6tables", "legacy4", "legacy6", "tls_dependencies", "tls_unit_paths"})
         for key in ("service", "units"):
             self.assertEqual(probe.HTTPS_COMMANDS[key][0], "systemctl")
             self.assertIn(probe.HTTPS_COMMANDS[key][1], ("show", "list-units"))
