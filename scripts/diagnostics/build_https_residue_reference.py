@@ -31,6 +31,8 @@ def build():
         release = json.loads((root/'scripts/https/caddy-release.json').read_text())
         result = {'format':1, 'run_id':42645562662, 'source_sha':SOURCE,
             'window':[1794238303,1794238361], 'release':release, 'control_sha256':value['control'],
+            # Owner-provided target for this specific failed attempt; no hostname/IP in source or logs.
+            'hostname_sha256':'8eb29f5f13d86babe90c7cf7792eb99b392e90722dc1d17cf493b76be6c3dec9',
             'config_template':value['config'], 'files':{}}
         for arch, item in release['archives'].items():
             path = root/(arch+'.tar.gz')

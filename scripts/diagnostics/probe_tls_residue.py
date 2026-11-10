@@ -166,6 +166,7 @@ class TlsResidueInspector:
                 except (ValueError,KeyError,IndexError,TypeError):self.block('FINGERPRINT_MISMATCH')
                 if not isinstance(host,str) or len(host)>253 or not re.fullmatch(r'(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}',host):
                     self.block('FINGERPRINT_MISMATCH')
+                if hashlib.sha256(host.encode()).hexdigest()!=ref['hostname_sha256']:self.block('FINGERPRINT_MISMATCH')
                 expected=json.loads(json.dumps(ref['config_template']).replace('reference.example.org',host))
                 # Python equality equates True/1/1.0. Canonical JSON preserves
                 # their types, rejects non-standard NaN/Infinity, and still

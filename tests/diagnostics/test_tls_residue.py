@@ -24,6 +24,7 @@ class ResidueTests(unittest.TestCase):
         self.tmp=tempfile.TemporaryDirectory();self.addCleanup(self.tmp.cleanup)
         self.root=Path(self.tmp.name)
         self.ref=json.loads((ROOT/'scripts/diagnostics/https-residue-reference.json').read_text())
+        self.ref['hostname_sha256']=hashlib.sha256(b'reference.example.org').hexdigest()
         self.ref['window']=[int(time.time())-20,int(time.time())+20]
         self.base,self.etc,self.data=(self.root/p.lstrip('/') for p in probe.TLS_ROOTS)
         self.release=self.base/'releases'/self.ref['release']['archives']['x64']['sha256']
@@ -115,6 +116,11 @@ class ResidueTests(unittest.TestCase):
                 value['apps']['http']['servers']['studio_https']['automatic_https']['disable_redirects']=wrong
                 (self.etc/'caddy.json').write_text(json.dumps(value))
                 self.assertBlocked('FINGERPRINT_MISMATCH')
+
+    def test_other_valid_hostname_is_not_attributed_to_the_approved_attempt(self):
+        path=self.etc/'caddy.json'
+        path.write_text(path.read_text().replace('reference.example.org','other.example.org'))
+        self.assertBlocked('FINGERPRINT_MISMATCH')
 
     def test_identity_missing_root_alias_login_home_extra_group_blocks(self):
         account=self.audit.account('ignored')

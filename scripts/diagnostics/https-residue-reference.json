@@ -184,6 +184,7 @@
     }
   },
   "format": 1,
+  "hostname_sha256": "8eb29f5f13d86babe90c7cf7792eb99b392e90722dc1d17cf493b76be6c3dec9",
   "release": {
     "archives": {
       "arm64": {
