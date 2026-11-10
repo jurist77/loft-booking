@@ -40,7 +40,7 @@ class ResidueTests(unittest.TestCase):
         (self.root/'proc/self/mountinfo').write_text('1 0 8:1 / / rw - ext4 /dev/synthetic rw\n')
         account=SimpleNamespace(pw_name=probe.TLS_USER,pw_uid=888,pw_gid=889,pw_dir='/nonexistent',pw_shell='/usr/sbin/nologin')
         group=SimpleNamespace(gr_name=probe.TLS_USER,gr_gid=889,gr_mem=[])
-        self.audit=probe.TlsResidueInspector(self.ref,self.root,lambda _:account,lambda:[group])
+        self.audit=probe.TlsResidueInspector(self.ref,self.root,lambda _:account,lambda:[group],machine=lambda:'x86_64')
         self.audit.root_uid=os.getuid()
         original=self.audit.info
         def info(name):
@@ -120,6 +120,10 @@ class ResidueTests(unittest.TestCase):
     def test_other_valid_hostname_is_not_attributed_to_the_approved_attempt(self):
         path=self.etc/'caddy.json'
         path.write_text(path.read_text().replace('reference.example.org','other.example.org'))
+        self.assertBlocked('FINGERPRINT_MISMATCH')
+
+    def test_official_binary_for_other_cpu_is_not_a_prepare_match(self):
+        self.audit.machine=lambda:'aarch64'
         self.assertBlocked('FINGERPRINT_MISMATCH')
 
     def test_identity_missing_root_alias_login_home_extra_group_blocks(self):

@@ -9,6 +9,7 @@ import grp
 import json
 import os
 from pathlib import Path
+import platform
 import pwd
 import re
 import stat
@@ -39,11 +40,12 @@ def tls_empty_report():
 
 class TlsResidueInspector:
     """root is only for isolated fixtures; production always uses / and /proc."""
-    def __init__(self, reference, root=Path('/'), account=pwd.getpwnam, groups=grp.getgrall, loaded=''):
+    def __init__(self, reference, root=Path('/'), account=pwd.getpwnam, groups=grp.getgrall, loaded='', machine=platform.machine):
         self.reference,self.root,self.account,self.groups=reference,root,account,groups
         self.seen={}; self.report=tls_empty_report(); self.uid=self.gid=None
         self.root_uid=0
         self.loaded=loaded
+        self.machine=machine
 
     def block(self, code): raise TlsBlocked(code)
 
@@ -136,7 +138,7 @@ class TlsResidueInspector:
             self.block('UNEXPECTED_OBJECT')
         choices=set(self.names(base+'/releases'))
         arch=next((a for a,v in ref['release']['archives'].items() if choices=={v['sha256']}),None)
-        if arch is None:self.block('FINGERPRINT_MISMATCH')
+        if arch is None or arch!={'x86_64':'x64','aarch64':'arm64'}.get(self.machine()):self.block('FINGERPRINT_MISMATCH')
         release=base+'/releases/'+ref['release']['archives'][arch]['sha256']
         if set(self.names(release))!={'caddy','LICENSE'}:self.block('UNEXPECTED_OBJECT')
         for name in (base+'/releases',release):
