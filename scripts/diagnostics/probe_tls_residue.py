@@ -179,7 +179,8 @@ class TlsResidueInspector:
                 except ValueError:self.block('FINGERPRINT_MISMATCH')
         # Timestamps corroborate exact fingerprints; never establish identity alone.
         start,end=ref['window']
-        for value in self.seen.values():
+        for name,value in self.seen.items():
+            if not self.related(name):continue
             if not all(start-120<=t/1e9<=end+120 for t in value[-2:]):self.block('METADATA_MISMATCH')
         self.report['checks']['fingerprints']='MATCH'
 
@@ -195,6 +196,14 @@ class TlsResidueInspector:
             if len(fields)<10 or ' - ' not in line:self.block('READ_OR_LIMIT_FAILED')
             def unescape(v):return re.sub(r'\\([0-7]{3})',lambda m:chr(int(m[1],8)),v)
             if any(self.related(unescape(v)) for v in (fields[3],fields[4])):self.block('DEPENDENCY_FOUND')
+            mountpoint=unescape(fields[4])
+            if name=='/proc/self/mountinfo' and not any(mountpoint==p or mountpoint.startswith(p+'/') for p in ('/proc','/sys','/dev')):
+                # Never trigger autofs/FUSE/network I/O by traversing another
+                # application's mount. Review before touching any staging path.
+                fstype=fields[fields.index('-')+1]
+                if fstype not in ('ext2','ext3','ext4','xfs','btrfs','overlay','tmpfs','ramfs','squashfs','vfat'):
+                    self.block('DEPENDENCY_REVIEW_REQUIRED')
+        return hashlib.sha256(text.encode()).hexdigest()
 
     def dependencies(self):
         def has_reference(raw):
@@ -271,9 +280,12 @@ class TlsResidueInspector:
         self.report['checks']['dependencies']='MATCH'
 
     def audit(self):
+        self.report=tls_empty_report();self.seen={}
         try:
             if self.reference.get('format')!=1:self.block('REFERENCE_INVALID')
+            mounts=self.mounts('/proc/self/mountinfo')
             self.metadata();self.files();self.dependencies()
+            if self.mounts('/proc/self/mountinfo')!=mounts:self.block('SNAPSHOT_CHANGED')
             for name,before in list(self.seen.items()):
                 # /proc values change normally; their identifiers are never evidence files.
                 if name.startswith('/proc/'):continue
@@ -281,9 +293,9 @@ class TlsResidueInspector:
                 if self.seen[name]!=before:self.block('SNAPSHOT_CHANGED')
             self.report['checks']['stable']='MATCH'
             self.report.update(status='MATCHED_FAILED_PREPARE',reason='MATCHED_PINNED_PREPARE',preservation_required=False)
-        except KeyError:self.report.update(reason='IDENTITY_MISMATCH')
-        except TlsBlocked as error:self.report.update(reason=str(error))
-        except (OSError,ValueError,TypeError,IndexError,RecursionError):self.report.update(reason='READ_OR_LIMIT_FAILED')
+        except KeyError:self.report.update(status='BLOCKED',reason='IDENTITY_MISMATCH',preservation_required=True)
+        except TlsBlocked as error:self.report.update(status='BLOCKED',reason=str(error),preservation_required=True)
+        except (OSError,ValueError,TypeError,IndexError,RecursionError):self.report.update(status='BLOCKED',reason='READ_OR_LIMIT_FAILED',preservation_required=True)
         return self.report
 
 

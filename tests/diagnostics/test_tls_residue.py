@@ -73,6 +73,11 @@ class ResidueTests(unittest.TestCase):
         self.assertEqual(before,after)
         response=fixture(residue=lambda:value);runner.validate(response)
 
+    def test_previous_match_cannot_survive_a_new_failed_snapshot(self):
+        self.assertEqual(self.audit.audit()['status'],'MATCHED_FAILED_PREPARE')
+        (self.base/'control.py').write_text(CANARY)
+        self.assertBlocked('FINGERPRINT_MISMATCH')
+
     def test_unknown_file_does_not_get_opened_or_logged(self):
         path=self.base/CANARY;path.write_text(CANARY)
         with patch.object(self.audit,'read',wraps=self.audit.read) as opened:
@@ -166,6 +171,12 @@ class ResidueTests(unittest.TestCase):
             (self.root/'proc/self/mountinfo').write_text(' '.join(fields)+'\n')
             self.assertBlocked('DEPENDENCY_FOUND')
 
+    def test_automount_network_or_unknown_filesystem_blocks_before_staging_reads(self):
+        for kind in ('autofs','nfs4','fuse.sshfs','unknown'):
+            (self.root/'proc/self/mountinfo').write_text('1 0 8:1 / / rw - ext4 /dev/synthetic rw\n2 1 0:7 / /foreign rw - '+kind+' source rw\n')
+            with patch.object(self.audit,'metadata',side_effect=AssertionError('must not traverse before mount review')):
+                self.assertBlocked('DEPENDENCY_REVIEW_REQUIRED')
+
     def test_process_uid_or_open_reference_blocks(self):
         proc=self.root/'proc/123';proc.mkdir()
         (proc/'status').write_text('Uid:\t888\t888\t888\t888\nGid:\t889\t889\t889\t889\nGroups:\t889\n')
@@ -223,6 +234,10 @@ class ResidueTests(unittest.TestCase):
 
     def test_timestamp_outside_recorded_apply_window_blocks(self):
         self.ref['window']=[1,2];self.assertBlocked('METADATA_MISMATCH')
+
+    def test_kernel_metadata_timestamps_are_not_installer_creation_evidence(self):
+        os.utime(self.root/'proc/self/mountinfo',(1,1))
+        self.assertEqual(self.audit.audit()['status'],'MATCHED_FAILED_PREPARE')
 
     def test_false_positive_remote_status_and_error_text_are_rejected(self):
         data=fixture();data['tls_residue'].update(status='MATCHED_FAILED_PREPARE',reason='MATCHED_PINNED_PREPARE',preservation_required=False)
