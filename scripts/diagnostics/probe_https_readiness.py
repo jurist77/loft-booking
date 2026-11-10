@@ -45,6 +45,7 @@ HTTPS_COMMANDS = {
     "tls_dependencies": ("systemctl", "show", "*", "--property=Id", "--property=User", "--property=Group",
         "--property=SupplementaryGroups", "--property=ExecStart", "--property=RootDirectory",
         "--property=WorkingDirectory", "--property=FragmentPath", "--property=DropInPaths", "--property=ReadWritePaths"),
+    "tls_unit_paths": ("systemctl", "show", "--property=UnitPath", "--value"),
 }
 UNITS = ("nginx.service", "caddy.service", "apache2.service", "haproxy.service", "traefik.service",
          "certbot.service", "certbot.timer", "snap.certbot.renew.timer", "acme-sh.service", "acme-sh.timer",

@@ -18,13 +18,13 @@ if 'deadline' not in globals():
 
 TLS_ROOTS = ('/opt/studio1925-https','/etc/studio1925-https','/var/lib/studio1925-tls')
 TLS_USER = 'studio1925tls'
-TLS_UNIT_ROOTS = ('/etc/systemd','/run/systemd','/usr/lib/systemd')
+TLS_UNIT_ROOTS = ('/etc/systemd','/run/systemd','/usr/lib/systemd','/usr/local/lib/systemd','/lib/systemd')
 TLS_UNIT_NAMES = ('studio1925-tls.service','studio1925-https-recover.service','studio1925-https-recover.timer',
     'studio1925-https-monitor.service','studio1925-https-monitor.timer')
 TLS_CHECKS = ('metadata','fingerprints','identity','empty_data','no_state','dependencies','stable')
 TLS_REASONS = ('NOT_CHECKED','READ_OR_LIMIT_FAILED','REFERENCE_INVALID','METADATA_MISMATCH',
     'UNEXPECTED_OBJECT','STATE_REQUIRES_PRESERVATION','FINGERPRINT_MISMATCH','IDENTITY_MISMATCH',
-    'DEPENDENCY_FOUND','SNAPSHOT_CHANGED','STUDIO_NOT_HEALTHY','MATCHED_PINNED_PREPARE')
+    'DEPENDENCY_FOUND','DEPENDENCY_REVIEW_REQUIRED','SNAPSHOT_CHANGED','STUDIO_NOT_HEALTHY','MATCHED_PINNED_PREPARE')
 
 
 class TlsBlocked(Exception):
@@ -242,7 +242,7 @@ class TlsResidueInspector:
         while todo:
             parent=todo.pop()
             directory=self.path(parent).lstat();identity=(directory.st_dev,directory.st_ino)
-            if identity in visited:self.block('DEPENDENCY_FOUND')
+            if identity in visited:self.block('DEPENDENCY_REVIEW_REQUIRED')
             visited.add(identity)
             for leaf in self.names(parent):
                 name=parent.rstrip('/')+'/'+leaf
@@ -255,6 +255,10 @@ class TlsResidueInspector:
                 if stat.S_ISLNK(st.st_mode):
                     target=os.path.normpath(os.path.join(parent,os.readlink(self.path(name))))
                     if self.related(target):self.block('DEPENDENCY_FOUND')
+                    if (Path(name).suffix in ('.service','.socket','.timer','.path','.target','.mount','.automount','.slice','.scope','.conf') and
+                            any(name.startswith(r+'/') for r in TLS_UNIT_ROOTS) and target!='/dev/null' and
+                            not any(target.startswith(r+'/') for r in TLS_UNIT_ROOTS)):
+                        self.block('DEPENDENCY_REVIEW_REQUIRED')
                 elif stat.S_ISDIR(st.st_mode):todo.append(name)
                 elif (stat.S_ISREG(st.st_mode) and Path(name).suffix in
                         ('.service','.socket','.timer','.path','.target','.mount','.automount','.slice','.scope','.conf') and
@@ -286,9 +290,14 @@ def audit_tls_residue(reference, run):
         with deadline(45):
             state,loaded=run('tls_dependencies')
             if state!='ok' or not re.search(r'^Id=studio1925\.service$',loaded,re.M):raise OSError()
+            state,paths=run('tls_unit_paths')
+            if state!='ok' or not paths.split() or any(not any(p.startswith(r+'/') for r in TLS_UNIT_ROOTS) for p in paths.split()):raise OSError()
             result=TlsResidueInspector(reference,loaded=loaded).audit()
             state,after=run('tls_dependencies')
             if result['status']=='MATCHED_FAILED_PREPARE' and (state!='ok' or after!=loaded):
+                result.update(status='BLOCKED',reason='SNAPSHOT_CHANGED',preservation_required=True)
+            state,after_paths=run('tls_unit_paths')
+            if result['status']=='MATCHED_FAILED_PREPARE' and (state!='ok' or after_paths!=paths):
                 result.update(status='BLOCKED',reason='SNAPSHOT_CHANGED',preservation_required=True)
             return result
     except (TimeoutError,OSError):

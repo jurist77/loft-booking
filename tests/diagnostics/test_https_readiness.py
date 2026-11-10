@@ -223,7 +223,7 @@ class HttpsReadinessTests(unittest.TestCase):
         # The only text file reader accepts the public OS metadata path.
         self.assertEqual(probe.PATHS["studio_config"], "/etc/studio1925/server.env")
         self.assertNotIn("STUDIO_SSH_PASSWORD", source)
-        self.assertEqual(set(probe.HTTPS_COMMANDS), {"service", "sockets4", "sockets6", "web4", "web6", "units", "clock", "ufw", "nft", "iptables", "ip6tables", "legacy4", "legacy6", "tls_dependencies"})
+        self.assertEqual(set(probe.HTTPS_COMMANDS), {"service", "sockets4", "sockets6", "web4", "web6", "units", "clock", "ufw", "nft", "iptables", "ip6tables", "legacy4", "legacy6", "tls_dependencies", "tls_unit_paths"})
         for key in ("service", "units"):
             self.assertEqual(probe.HTTPS_COMMANDS[key][0], "systemctl")
             self.assertIn(probe.HTTPS_COMMANDS[key][1], ("show", "list-units"))

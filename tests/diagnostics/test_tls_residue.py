@@ -140,6 +140,16 @@ class ResidueTests(unittest.TestCase):
             unit.write_text('[Service]\n'+reference+'\n'+CANARY)
             self.assertBlocked('DEPENDENCY_FOUND')
 
+    def test_local_vendor_units_external_alias_and_custom_search_path_block(self):
+        unit=self.root/'usr/local/lib/systemd/system/foreign.service';unit.parent.mkdir(parents=True)
+        unit.write_text('[Service]\nSupplementaryGroups=0 889\n')
+        self.assertBlocked('DEPENDENCY_FOUND');unit.unlink()
+        unit.symlink_to('/foreign/provider.service')
+        self.assertBlocked('DEPENDENCY_REVIEW_REQUIRED')
+        from unittest.mock import Mock
+        run=Mock(side_effect=[('ok','Id=studio1925.service\n'),('ok','/foreign/unit-directory')])
+        self.assertEqual(probe.audit_tls_residue(self.ref,run)['status'],'BLOCKED')
+
     def test_in_memory_unit_and_inactive_alias_are_dependencies(self):
         self.audit.loaded='User='+probe.TLS_USER+'\n'+CANARY
         self.assertBlocked('DEPENDENCY_FOUND');self.audit.loaded=''
@@ -188,7 +198,8 @@ class ResidueTests(unittest.TestCase):
         from unittest.mock import Mock
         with patch.object(probe,'TlsResidueInspector') as inspector:
             inspector.return_value.audit.return_value=copy.deepcopy(matched)
-            run=Mock(side_effect=[('ok','Id=studio1925.service\n'),('ok','Id=studio1925.service\nchanged')])
+            run=Mock(side_effect=[('ok','Id=studio1925.service\n'),('ok','/etc/systemd/system'),
+                ('ok','Id=studio1925.service\nchanged'),('ok','/etc/systemd/system')])
             result=probe.audit_tls_residue(self.ref,run)
             self.assertEqual(result['reason'],'SNAPSHOT_CHANGED')
         response=fixture(residue=lambda:matched)
