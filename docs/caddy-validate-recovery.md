@@ -1,5 +1,7 @@
 # Caddy validate после VERIFIED_PORTS_PROBE
 
+Подробная read-only атрибуция файлов и проект контролируемого карантина: [https-residue-audit.md](https-residue-audit.md). Она дополняет прежние грубые metadata-классификации; пока новый snapshot не получен, принадлежность остатков не считается подтверждённой.
+
 ## Воспроизведение и причина
 
 Run [42645562662](https://github.com/jurist77/loft-booking/actions/runs/42645562662) вернул `CADDY_CONFIG_INVALID` после успешного port proof. Неизменённый JSON из `configuration.caddy_config()` проходит стандартный `caddy validate --config ...` официального закреплённого Caddy **2.11.9**. Проверка выполнена локально и отдельно от TLS UID в CI; issuer Let's Encrypt, challenges, storage, admin socket, listeners и headers не подменялись.

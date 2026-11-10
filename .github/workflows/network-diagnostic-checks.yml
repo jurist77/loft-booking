@@ -11,11 +11,18 @@ permissions:
 
 jobs:
   tests:
-    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        runner: [ubuntu-24.04, ubuntu-24.04-arm]
+    runs-on: ${{ matrix.runner }}
     timeout-minutes: 5
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           persist-credentials: false
+          fetch-depth: 0
+      - name: Verify failed-prepare reference from pinned source and official checksummed Caddy archives
+        run: python3 -B scripts/diagnostics/build_https_residue_reference.py --verify
       - name: Fixture-only read-only and redaction checks; never run real VPS diagnostics
         run: PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s tests/diagnostics -v
