@@ -110,6 +110,25 @@ def create_booking():
 
 def assert_booking(date):
     assert http("/api/availability?date=" + date)[1]["busy"] == [{"start": "12:00", "end": "13:00"}]
+    check_telegram_queue()
+
+
+def check_telegram_queue(seed=False):
+    # No bot config/token: real packaged Node/SQLite, no Telegram network call.
+    release = installer.BASE / "releases" / state()["current"]
+    script = "import {getDatabase} from './src/server/database.ts';const d=getDatabase();"
+    if seed:
+        script += """
+const at=Date.now();d.transaction(()=>{
+ d.prepare("INSERT INTO telegram_recipients(id,display_name,telegram_user_id,chat_id,connection_status,created_at,updated_at) VALUES ('ci-recipient','Fixture','111000','111000','connected',?,?)").run(at,at);
+ d.prepare("INSERT INTO telegram_outbox(id,kind,recipient_id,created_at,deadline_at,next_attempt_at) VALUES ('ci-pending','test','ci-recipient',?,?,?)").run(at,at+86400000,at);
+})() ;
+"""
+    script += "if(d.prepare(\"SELECT count(*) AS n FROM telegram_outbox WHERE id='ci-pending' AND status='pending'\").get().n!==1)process.exit(1);d.close();"
+    installer.helper(release, ["--input-type=module", "-e", script], "CI_TELEGRAM_QUEUE_LOST")
+    # Exercise the packaged operator CLI, not only bundled Next imports.
+    output = json.loads(installer.helper(release, ["scripts/telegram.mjs", "status"], "CI_TELEGRAM_CLI_FAILED"))
+    assert not output["configurationReady"] and not output["enabled"]
 
 
 def variant(original, directory, version, fault=None):
@@ -125,7 +144,7 @@ def variant(original, directory, version, fault=None):
     if fault in ("bad-start", "changed-schema-bad-start"):
         (root / "root/app/.next-server/BUILD_ID").unlink()
     if fault in ("bad-migration", "changed-schema-bad-start"):
-        migration = root / "root/app/migrations/sqlite/0003_ci_test.sql"
+        migration = root / "root/app/migrations/sqlite/0004_ci_test.sql"
         migration.write_text("NOT VALID SQL;" if fault == "bad-migration" else "CREATE TABLE _ci_installer(value INTEGER) STRICT;")
         manifest["migrations"][migration.name] = installer.digest(migration)
     manifest["unpacked_bytes"] = sum(p.stat().st_size for p in (root / "root").rglob("*") if p.is_file())
@@ -230,6 +249,7 @@ def main():
             first = apply(args.archive, args.version)
             assert first["operation"] == "install" and first["port"] != 3000
         assert_booking_date = create_booking()
+        check_telegram_queue(seed=True)
         check_isolation()
         original_release = state()["current"]
         original_pid = command(["systemctl", "show", installer.SERVICE, "-p", "MainPID", "--value"]).stdout

@@ -67,13 +67,18 @@ class FakeStore:
         self.assets.pop(release["tag_name"], None)
 
 
-def bundle(directory, day=1, nonce=None):
+def bundle(directory, day=1, nonce=None, telegram=False):
     source = directory / "data"
     source.mkdir(exist_ok=True)
     for name in ("photos", "settings"):
         (source / name).mkdir(exist_ok=True)
     (source / "photos/fixture.jpg").write_bytes(b"synthetic-photo-fixture")
     (source / "settings/studio.json").write_text('{"name":"studio 19.25"}')
+    if telegram:
+        # Isolated archive only; never installed or used for a network request.
+        path = source / "settings/telegram-bot.json"
+        path.write_text(json.dumps({"version": 1, "token": "123456:" + "S" * 35}))
+        os.chmod(path, 0o600)
     db = sqlite3.connect(source / "studio.sqlite")
     db.execute("CREATE TABLE IF NOT EXISTS fixture(value TEXT)")
     db.commit()
@@ -171,7 +176,7 @@ class BackupTests(unittest.TestCase):
     def test_real_encryption_restore_photos_settings_and_sqlite(self):
         with tempfile.TemporaryDirectory() as folder:
             folder = Path(folder)
-            path, manifest = bundle(folder)
+            path, manifest = bundle(folder, telegram=True)
             cipher = folder / "snapshot.tar.gz.gpg"
             backup.crypt(path, cipher, PHRASE)
             self.assertNotIn(b"studio 19.25", cipher.read_bytes())
@@ -184,6 +189,10 @@ class BackupTests(unittest.TestCase):
             destination.mkdir()
             backup.validate_bundle(restored, destination)
             self.assertEqual((destination / "photos/fixture.jpg").read_bytes(), b"synthetic-photo-fixture")
+            token = "123456:" + "S" * 35
+            self.assertNotIn(token.encode(), cipher.read_bytes())
+            self.assertEqual(json.loads((destination / "settings/telegram-bot.json").read_text())["token"], token)
+            self.assertEqual((destination / "settings/telegram-bot.json").stat().st_mode & 0o777, 0o600)
             db = sqlite3.connect(destination / "studio.sqlite")
             self.assertEqual(db.execute("PRAGMA integrity_check").fetchone()[0], "ok")
             db.close()

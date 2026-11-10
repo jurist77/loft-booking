@@ -11,6 +11,7 @@ const result = spawnSync(process.execPath, ["node_modules/next/dist/bin/next", "
     NEXT_PUBLIC_BASE_PATH: process.env.NEXT_PUBLIC_BASE_PATH ?? "/loft-booking",
     NEXT_PUBLIC_API_BASE_URL: "",
     NEXT_TELEMETRY_DISABLED: "1",
+    STUDIO_TELEGRAM_WORKER: "0",
   },
 });
 if (result.error) throw result.error;

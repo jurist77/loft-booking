@@ -76,12 +76,13 @@ class InstallerTests(unittest.TestCase):
                 packager.audit_root(root)
             required = ("usr/bin/node", "app/.next-server/BUILD_ID", "app/package.json", "app/next.config.ts",
                         "app/node_modules/next/dist/bin/next", "app/scripts/database.mjs",
-                        "app/scripts/installer/acceptance.mjs", "app/scripts/installer/schema.mjs", "app/migrations/sqlite/0001_fixture.sql")
+                        "app/scripts/telegram.mjs", "app/scripts/installer/acceptance.mjs", "app/scripts/installer/schema.mjs", "app/migrations/sqlite/0001_fixture.sql")
             for name in required:
                 path = root / name; path.parent.mkdir(parents=True, exist_ok=True); path.write_text("synthetic fixture")
             packager.audit_root(root)
             for name, value in (("app/.env.local", b"synthetic, not an actual secret"),
-                                ("app/settings.dat", b"SQLite format 3\x00" + b"synthetic data")):
+                                ("app/settings.dat", b"SQLite format 3\x00" + b"synthetic data"),
+                                ("app/telegram-bot.json", b"synthetic protected settings")):
                 path = root / name; path.write_bytes(value)
                 with self.assertRaisesRegex(RuntimeError, "PACKAGE_(PRIVATE_FILE|SQLITE_DATA)_FORBIDDEN"):
                     packager.audit_root(root)
@@ -111,6 +112,12 @@ class InstallerTests(unittest.TestCase):
             with self.assertRaisesRegex(remote.InstallError, "ENVIRONMENT_CHANGED_OUTSIDE_INSTALLER"):
                 remote.install(Path("/tmp/not-read"), "0" * 64, "b" * 40)
             commands.assert_not_called()
+
+    def test_worker_runtime_flag_is_in_own_unit_without_changing_managed_environment(self):
+        unit = remote.service_text(Path("/opt/studio1925/releases/fixture"), 3000)
+        self.assertIn("Environment=STUDIO_TELEGRAM_WORKER=1", unit)
+        self.assertIn("BindReadOnlyPaths=-/etc/resolv.conf:/etc/resolv.conf", unit)
+        self.assertNotIn("TELEGRAM", remote.environment_text(3000))
 
     def test_main_gate_rejects_other_refs_missing_secret_and_failed_newest_check(self):
         env = {"STUDIO_SERVER_IP": "203.0.113.9", "STUDIO_PASSWORD_PRESENT": "true", "GITHUB_SHA": VERSION,

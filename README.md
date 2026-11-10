@@ -47,13 +47,17 @@ npm run dev:server
 
 Онлайн-копия: `npm run db:backup -- --to /absolute/private-backups/new.sqlite`. Восстановление в **новый отсутствующий файл**: `SQLITE_PATH=/absolute/restore/studio.sqlite npm run db:restore -- --from /absolute/private-backups/new.sqlite`. Не копировать один live-файл при WAL. [Пошаговая инструкция](docs/backend-local-setup.md), [сравнение архитектур](docs/backend-architecture.md), [systemd/HTTPS/зашифрованный offsite backup и recovery](docs/sqlite-operations.md), [результаты проверки](docs/sqlite-acceptance.md).
 
-Режим задаётся APP_MODE явно: `dev/build/start` — DEMO Node, `build:demo` — static DEMO, команды `*:server` — SERVER. Пять экранов DEMO сохранены; SERVER проходит тот же пятиэкранный путь с настоящей SQLite. [Модель этапа 2.2](docs/booking-model-v2.2.md) хранит ресурсы, контакты брони и минимальную историю; транзакции защищают пересечения и повторные запросы. [API этапа 2.3](docs/booking-api-v2.3.md): `GET /api/availability?date=YYYY-MM-DD` и `POST /api/bookings`, только в SERVER. Контакты/ID броней в доступности не возвращаются. [Клиент этапа 2.4](docs/server-client-v2.4.md) подключён к API; админ-панель, VPS и уведомления не реализованы.
+Режим задаётся APP_MODE явно: `dev/build/start` — DEMO Node, `build:demo` — static DEMO, команды `*:server` — SERVER. Пять экранов DEMO сохранены; SERVER проходит тот же пятиэкранный путь с настоящей SQLite. [Модель этапа 2.2](docs/booking-model-v2.2.md) хранит ресурсы, контакты брони и минимальную историю; транзакции защищают пересечения и повторные запросы. [API этапа 2.3](docs/booking-api-v2.3.md): `GET /api/availability?date=YYYY-MM-DD` и `POST /api/bookings`, только в SERVER. Контакты/ID броней в доступности не возвращаются. [Клиент этапа 2.4](docs/server-client-v2.4.md) подключён к API; административная панель пока не реализована.
 
 POST требует точного `Origin`, JSON не более 4096 байт и стабильного UUID `requestId`. По умолчанию `API_PUBLIC_ORIGIN=http://127.0.0.1:3000`, `API_TRUST_PROXY=false`; общий лимит POST — 10 запросов в минуту. При другом адресе/порте изменить Origin в локальном env. Перед публичным запуском обязательна настройка proxy/HTTPS/лимитов: [контракт и защита](docs/booking-api-v2.3.md). Origin не заменяет авторизацию и не останавливает ботов, способных подставить заголовок.
 
 [HTTPS: read-only аудит и проект внедрения](docs/https-readiness.md) — ручной workflow **Diagnose Studio HTTPS readiness**, варианты DuckDNS/Let's Encrypt и IP-сертификатов, Origin/proxy/cutover/renew/rollback. Этот этап не устанавливает TLS и не открывает порты; сначала фактический аудит и отдельное согласование владельца.
 
 [Управляемый HTTPS: Caddy, ручной check/apply, сохранение HTTPS при обновлении/restore и мониторинг](docs/managed-https.md). Подготовка PR не выполняет изменений на VPS; реальный запуск требует отдельного разрешения.
+
+## Telegram администраторов
+
+[Настройка бота, привязка владельца, приглашения и эксплуатация](docs/telegram-notifications.md). Уведомления выключены по умолчанию. Задания создаются атомарно с бронью в SQLite; лёгкий обработчик работает внутри существующего SERVER-процесса. DEMO не обращается к Telegram. Публичных административных endpoints нет; до появления панели управление выполняет уполномоченный локальный оператор. [Отчёт проверок](docs/acceptance/telegram/README.md).
 
 ## Проверки
 

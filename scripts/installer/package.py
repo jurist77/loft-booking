@@ -40,7 +40,7 @@ def copy_tree(source, destination):
 def audit_root(root):
     """Reject runtime data/credentials; inspect the final tree, not just inputs."""
     required = ("usr/bin/node", "app/.next-server/BUILD_ID", "app/package.json", "app/next.config.ts",
-                "app/node_modules/next/dist/bin/next", "app/scripts/database.mjs",
+                "app/node_modules/next/dist/bin/next", "app/scripts/database.mjs", "app/scripts/telegram.mjs",
                 "app/scripts/installer/acceptance.mjs", "app/scripts/installer/schema.mjs")
     if any(not (root / name).is_file() for name in required) or not list((root / "app/migrations/sqlite").glob("*.sql")):
         raise RuntimeError("PACKAGE_INCOMPLETE")
@@ -50,7 +50,7 @@ def audit_root(root):
         if not path.is_file():
             continue
         name = path.name.lower()
-        if (name.startswith(".env") or name.endswith((".sqlite", ".sqlite-wal", ".sqlite-shm", ".db", ".db-wal", ".db-shm", ".dump", ".pem", ".key")) or
+        if (name == "telegram-bot.json" or name.startswith(".env") or name.endswith((".sqlite", ".sqlite-wal", ".sqlite-shm", ".db", ".db-wal", ".db-shm", ".dump", ".pem", ".key")) or
                 any(part in (".git", "__pycache__") for part in path.parts)):
             raise RuntimeError("PACKAGE_PRIVATE_FILE_FORBIDDEN")
         with path.open("rb") as stream:
@@ -81,11 +81,13 @@ def build(destination, version):
             shutil.copyfile(name, app / name)
         (app / "scripts/installer").mkdir(parents=True)
         shutil.copyfile("scripts/database.mjs", app / "scripts/database.mjs")
+        shutil.copyfile("scripts/telegram.mjs", app / "scripts/telegram.mjs")
         shutil.copyfile("scripts/installer/schema.mjs", app / "scripts/installer/schema.mjs")
         shutil.copyfile("scripts/installer/acceptance.mjs", app / "scripts/installer/acceptance.mjs")
         copy_tree(Path("migrations/sqlite"), app / "migrations/sqlite")
         for name in ("usr/bin", "etc", "dev", "proc", "sys", "tmp", "data", "backups", "app/.next-server/cache", "licenses"):
             (root / name).mkdir(parents=True, exist_ok=True)
+        (root / "etc/resolv.conf").touch(mode=0o644)  # runtime read-only host bind; no baked runner/provider DNS
         shutil.copyfile(node, root / "usr/bin/node")
         os.chmod(root / "usr/bin/node", 0o755)
         # Resolve every native dependency on the matching Ubuntu/architecture.
