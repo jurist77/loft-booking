@@ -108,6 +108,14 @@ class ResidueTests(unittest.TestCase):
         data=path.read_text();path.write_text('{"admin":{},'+data[1:])
         self.assertBlocked('FINGERPRINT_MISMATCH')
 
+    def test_json_boolean_and_number_types_must_match_exactly(self):
+        value=copy.deepcopy(self.ref['config_template'])
+        for wrong in (1,1.0,float('nan')):
+            with self.subTest(value=wrong):
+                value['apps']['http']['servers']['studio_https']['automatic_https']['disable_redirects']=wrong
+                (self.etc/'caddy.json').write_text(json.dumps(value))
+                self.assertBlocked('FINGERPRINT_MISMATCH')
+
     def test_identity_missing_root_alias_login_home_extra_group_blocks(self):
         account=self.audit.account('ignored')
         for field,value in (('pw_uid',0),('pw_shell','/bin/bash'),('pw_dir','/home/user')):

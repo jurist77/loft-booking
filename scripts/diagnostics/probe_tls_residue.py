@@ -167,7 +167,13 @@ class TlsResidueInspector:
                 if not isinstance(host,str) or len(host)>253 or not re.fullmatch(r'(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}',host):
                     self.block('FINGERPRINT_MISMATCH')
                 expected=json.loads(json.dumps(ref['config_template']).replace('reference.example.org',host))
-                if actual!=expected:self.block('FINGERPRINT_MISMATCH')
+                # Python equality equates True/1/1.0. Canonical JSON preserves
+                # their types, rejects non-standard NaN/Infinity, and still
+                # permits harmless whitespace/key ordering differences.
+                try:
+                    canonical=lambda v:json.dumps(v,sort_keys=True,separators=(',',':'),allow_nan=False)
+                    if canonical(actual)!=canonical(expected):self.block('FINGERPRINT_MISMATCH')
+                except ValueError:self.block('FINGERPRINT_MISMATCH')
         # Timestamps corroborate exact fingerprints; never establish identity alone.
         start,end=ref['window']
         for value in self.seen.values():
