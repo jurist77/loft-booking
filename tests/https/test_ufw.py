@@ -158,6 +158,9 @@ class FirewallTests(unittest.TestCase):
         fw.F.stock_nft_profile(data,profiles=(reference,))
         data['ip4']=data['ip4'].replace('-m comment --comment dapp_OpenSSH -m tcp --dport 22 -j ACCEPT','-m tcp --dport 22 -j ACCEPT -m comment --comment dapp_OpenSSH')
         fw.F.stock_nft_profile(data,profiles=(reference,))
+        data['ip4']=data['ip4'].replace('--comment dapp_OpenSSH', '--comment "\'dapp_OpenSSH\'"')
+        fw.F.stock_nft_profile(data,profiles=(reference,))
+        self.assertEqual(fw.F.canonical_rule(['--comment', "'dapp_OpenSSH'"]),['--comment','dapp_OpenSSH'])
         data['ip4']=data['ip4'].replace('-j ACCEPT -m comment','-j ACCEPT -m conntrack -m comment')
         with self.assertRaises(fw.F.Unsafe):fw.F.stock_nft_profile(data,profiles=(reference,))
 

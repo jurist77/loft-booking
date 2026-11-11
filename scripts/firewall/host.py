@@ -167,7 +167,10 @@ def canonical_rule(args):
     result = []; i = 0
     while i < len(args):
         if args[i:i + 2] in (["-m", "tcp"], ["-m", "udp"]): i += 2; continue
-        result.append(args[i].replace("/minute", "/min")); i += 1
+        # Audited UFW uses split(), not shlex, when sending the app marker to
+        # iptables. Literal quotes are annotation data, not packet predicates.
+        value = "dapp_OpenSSH" if i and args[i-1] == "--comment" and args[i] == "'dapp_OpenSSH'" else args[i]
+        result.append(value.replace("/minute", "/min")); i += 1
     return result
 
 
