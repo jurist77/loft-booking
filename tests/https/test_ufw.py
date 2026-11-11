@@ -148,6 +148,19 @@ class FirewallTests(unittest.TestCase):
             bad['nft']=json.dumps(nf)
             with self.assertRaises(fw.F.Unsafe):fw.F.stock_nft_profile(bad,profiles=(reference,))
 
+    def test_stock_user_annotations_may_have_either_serializer_order_but_never_an_extra_match(self):
+        data=Fixture().take();nf=json.loads(data['nft'])
+        for version,family,prefix in ((4,'ip','ufw'),(6,'ip6','ufw6')):
+            data['ip'+str(version)]=data['ip'+str(version)].replace(f'-A {prefix}-user-input -p tcp -m tcp --dport 22 -j ACCEPT',f'-A {prefix}-user-input -p tcp -m comment --comment dapp_OpenSSH -m tcp --dport 22 -j ACCEPT')
+            rule=next(r['rule'] for r in nf['nftables'] if 'rule'in r and r['rule']['family']==family and r['rule']['chain']==prefix+'-user-input')
+            rule['expr'].insert(0,{'xt':{'type':'match','name':'comment'}})
+        data['nft']=json.dumps(nf);reference=fw.F.stock_shape(data)
+        fw.F.stock_nft_profile(data,profiles=(reference,))
+        data['ip4']=data['ip4'].replace('-m comment --comment dapp_OpenSSH -m tcp --dport 22 -j ACCEPT','-m tcp --dport 22 -j ACCEPT -m comment --comment dapp_OpenSSH')
+        fw.F.stock_nft_profile(data,profiles=(reference,))
+        data['ip4']=data['ip4'].replace('-j ACCEPT -m comment','-j ACCEPT -m conntrack -m comment')
+        with self.assertRaises(fw.F.Unsafe):fw.F.stock_nft_profile(data,profiles=(reference,))
+
     def test_bundled_module_and_all_safe_codes_are_in_protocol(self):
         source=h.workflow.source()
         self.assertIn(b"'studio_firewall'",source);self.assertIn(b"'firewall'",source)

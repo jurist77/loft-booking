@@ -301,22 +301,34 @@ def stock_nft_profile(data, profiles=STANDARD_UFW_PROFILES):
             ip_rules=[r for r in table['rules'] if r[1]==chain]; nft_rules=observed.get(key,[])
             if len(ip_rules)!=len(nft_rules):raise Unsafe('STANDARD_UFW_USER_RULE_UNCONFIRMED')
             for args,native in zip(ip_rules,nft_rules):
-                args=args[:];i=2
+                # iptables-save may place comment/protocol modules in another
+                # order than the UFW file. Parse only this conjunction of known
+                # primitive options; never ignore unknown flags or duplicates.
+                fields={};modules=[];i=2
                 while i<len(args):
-                    if args[i:i+2] in (['-m','tcp'],['-m','udp']):del args[i:i+2]
-                    else:i+=1
-                if len(args) not in (8,12) or args[:3]!=['-A',chain,'-p'] or args[3] not in ('tcp','udp') or args[4]!='--dport' or not args[5].isdigit() or not 1<=int(args[5])<=65535 or args[-2:]!=['-j','ACCEPT']:
-                    raise Unsafe('STANDARD_UFW_USER_RULE_UNCONFIRMED')
-                proto,port=args[3],int(args[5]);comment=len(args)==12
-                if comment and (args[6:10]!=['-m','comment','--comment','dapp_OpenSSH'] or proto!='tcp' or port!=22):raise Unsafe('STANDARD_UFW_USER_RULE_UNCONFIRMED')
-                if native.get('comment') not in (None,'dapp_OpenSSH' if comment else None):raise Unsafe('STANDARD_UFW_USER_RULE_UNCONFIRMED')
+                    if i+1>=len(args):raise Unsafe('STANDARD_UFW_USER_IP_RULE_UNCONFIRMED')
+                    key,value=args[i:i+2];i+=2
+                    if key=='-m':modules.append(value)
+                    elif key in ('-p','--dport','-j','--comment') and key not in fields:fields[key]=value
+                    else:raise Unsafe('STANDARD_UFW_USER_IP_RULE_UNCONFIRMED')
+                if set(fields)-{'-p','--dport','-j','--comment'} or not {'-p','--dport','-j'}<=set(fields) or fields['-p'] not in ('tcp','udp') or fields['-j']!='ACCEPT' or not fields['--dport'].isdigit() or not 1<=int(fields['--dport'])<=65535:
+                    raise Unsafe('STANDARD_UFW_USER_IP_RULE_UNCONFIRMED')
+                proto,port=fields['-p'],int(fields['--dport']);comment='--comment' in fields
+                allowed_modules=[proto]+(['comment'] if comment else [])
+                if len(modules)!=len(set(modules)) or any(m not in allowed_modules for m in modules) or ('comment' in modules)!=comment:
+                    raise Unsafe('STANDARD_UFW_USER_IP_RULE_UNCONFIRMED')
+                if comment and (fields['--comment']!='dapp_OpenSSH' or proto!='tcp' or port!=22):raise Unsafe('STANDARD_UFW_USER_PROFILE_UNCONFIRMED')
+                if native.get('comment') not in (None,'dapp_OpenSSH' if comment else None):raise Unsafe('STANDARD_UFW_USER_COMMENT_UNCONFIRMED')
                 expr=[clean_nft(v) for v in native['expr'] if set(v)!={'counter'}]
                 match={'match':{'op':'==','left':{'payload':{'protocol':proto,'field':'dport'}},'right':port}}
-                tail=([{'xt':{'type':'match','name':'comment'}}] if comment else [])+[{'accept':None}]
+                annotation={'xt':{'type':'match','name':'comment'}}
+                if sum(item==annotation for item in expr)!=int(comment):raise Unsafe('STANDARD_UFW_USER_NFT_RULE_UNCONFIRMED')
+                expr=[item for item in expr if item!=annotation]
+                tail=[{'accept':None}]
                 candidates=[[match,*tail]]
                 candidates.append([{'match':{'op':'==','left':{'meta':{'key':'l4proto'}},'right':proto}},match,*tail])
                 if family==4:
                     candidates.append([{'match':{'op':'==','left':{'payload':{'protocol':'ip','field':'protocol'}},'right':6 if proto=='tcp' else 17}},match,*tail])
-                if json.dumps(expr,sort_keys=True) not in {json.dumps(c,sort_keys=True) for c in candidates}:raise Unsafe('STANDARD_UFW_USER_RULE_UNCONFIRMED')
+                if json.dumps(expr,sort_keys=True) not in {json.dumps(c,sort_keys=True) for c in candidates}:raise Unsafe('STANDARD_UFW_USER_NFT_RULE_UNCONFIRMED')
     if set(observed)-expected_keys:raise Unsafe('STANDARD_UFW_USER_RULE_UNCONFIRMED')
     return entries
