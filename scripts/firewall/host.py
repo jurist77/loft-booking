@@ -14,7 +14,7 @@ import sys
 if "COMMANDS" not in globals():  # Normal imports in fixture tests; payload embeds these.
     sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "diagnostics"))
     from probe_studio_network import COMMANDS, LIMIT, read_command, read_health, service_summary, ufw_summary, deadline
-    from rules import Unsafe, saved_tables, empty_tables, ip_rule, ip_profile, nft_profile, clean_nft, expected_delta, stock_shape, stock_nft_profile
+    from rules import Unsafe, saved_tables, empty_tables, ip_rule, ip_profile, nft_profile, clean_nft, expected_delta, stock_shape, stock_nft_profile, stock_user_file
     from bindings import listener_records, listener_ownership, studio_owns, bind_proof
     import json
     import re
@@ -160,7 +160,7 @@ def backend_of(data):
 def persistent_rules(raw):
     # Preserve rule order and tuple metadata (including comments), not generated
     # headers or counter values. UFW regenerates these files for a normal add.
-    return [line for line in raw.splitlines() if line.startswith(("### tuple ###", "-A ", ":", "*")) or line == "COMMIT"]
+    return [line for line in raw.splitlines() if line.startswith(("### tuple ###", "-A ", "-I ", ":", "*")) or line == "COMMIT"]
 
 
 def canonical_rule(args, annotations=False):
@@ -245,7 +245,7 @@ def firewall_plan(data, port=3000, allow_existing=False):
             if allow_existing and profile[1]: needed.append(version)
         # Pending/different persisted rules could turn an add into replacement.
         active = saved_tables(data["ip" + str(version)])["filter"]
-        saved = saved_tables(data["user" + str(version)])["filter"]
+        saved = (stock_user_file(data["user" + str(version)], version)[1] if stock else saved_tables(data["user" + str(version)]))["filter"]
         user_prefix = ("ufw" if version == 4 else "ufw6") + "-user-"
         if not any(chain.startswith(user_prefix) for chain in saved["chains"]): raise Unsafe("PERSISTED_RULES_DIFFER")
         for chain in saved["chains"]:

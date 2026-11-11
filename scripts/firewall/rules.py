@@ -245,6 +245,22 @@ def expected_delta(before, after, backend, port=3000, families=(4, 6)):
 # In iptables-nft compatibility mode nft JSON intentionally omits xt payloads.
 # Both canonical views must match a reviewed stock profile, not merely the word
 # "xt". User allow rules are excluded here and verified separately rule-by-rule.
+def stock_user_file(raw, family):
+    begin,end='### RULES ###\n','### END RULES ###\n'
+    if raw.count(begin)!=1 or raw.count(end)!=1:raise Unsafe('STANDARD_UFW_PERSISTED_TEMPLATE_UNCONFIRMED')
+    prefix,rest=raw.split(begin);body,suffix=rest.split(end)
+    user=('ufw' if family==4 else 'ufw6')+'-user-'
+    for line in body.splitlines():
+        if not line.strip() or line.startswith('### tuple ###'):continue
+        if not line.startswith(('-A '+user+'input ','-A '+user+'output ')):raise Unsafe('STANDARD_UFW_PERSISTED_TEMPLATE_UNCONFIRMED')
+    # Never execute persisted -I instructions. Their complete logging/footer
+    # template must equal the audited serializer, and all live base chains
+    # must equal the corresponding independent kernel reference.
+    template=hashlib.sha256((prefix+begin+end+suffix).encode()).hexdigest()
+    headers='*filter\n:'+user+'input - [0:0]\n:'+user+'output - [0:0]\n'
+    return template,saved_tables(headers+body+'\nCOMMIT\n')
+
+
 def stock_shape(data):
     def digest(value):return hashlib.sha256(json.dumps(value,sort_keys=True).encode()).hexdigest()
     def user(chain):return chain in ('ufw-user-input','ufw-user-output','ufw6-user-input','ufw6-user-output')
@@ -263,15 +279,17 @@ def stock_shape(data):
     result['nft']=digest({'topology':sorted(topology,key=lambda x:json.dumps(x,sort_keys=True)),
                           'rules':{'/'.join(k):v for k,v in chains.items()}})
     result['files']=digest({name:data['protected'][name] for name in ('/etc/ufw/before.rules','/etc/ufw/before6.rules','/etc/ufw/after.rules','/etc/ufw/after6.rules')})
+    for family in (4,6):result['user'+str(family)]=stock_user_file(data['user'+str(family)],family)[0]
     return result
 
 
 # Reviewed Ubuntu 24.04 UFW 0.36.2-6 stock kernel profiles. Filled from the
 # isolated official-package CI reference, never from the target VPS itself.
-# Reference: CI 42994817792, independent x64/ARM64 outputs agree. low/off.
+# Kernel reference: CI 42994817792, independent x64/ARM64 outputs agree.
+# Persisted templates: the same checksum-verified official serializer, low/off.
 STANDARD_UFW_PROFILES = (
-    {'files': '7cb9129a0b138217bf8f320a70b0643a5477d2cc5dbf2021c8adbae63312f2bc', 'ip4': '5277d00b029c6aaf684bc8fef8b769df64b7f9102bb17ecae88bbc10f457f69c', 'ip6': 'fee641b9764e16633862e0f2d0931234e30b69827024c772d1414e5cc87917cd', 'nft': '1390889094e4e83a3c29cb526466f88f3de1a229e66f1ec6be394db3348133da'},
-    {'files': '7cb9129a0b138217bf8f320a70b0643a5477d2cc5dbf2021c8adbae63312f2bc', 'ip4': '35e35e3027222cdfaf089b6944cfe51d4dfd7b577783ba975c6d99021ddbf64d', 'ip6': 'cadc28e581f343d2f3443d4af3998eb08d81d356311b18c8f3a879619b7a8698', 'nft': '3c89bd114202a84222101301fd25c061877d45d32751ff0f513d2525d13c8143'},
+    {'files': '7cb9129a0b138217bf8f320a70b0643a5477d2cc5dbf2021c8adbae63312f2bc', 'ip4': '5277d00b029c6aaf684bc8fef8b769df64b7f9102bb17ecae88bbc10f457f69c', 'ip6': 'fee641b9764e16633862e0f2d0931234e30b69827024c772d1414e5cc87917cd', 'nft': '1390889094e4e83a3c29cb526466f88f3de1a229e66f1ec6be394db3348133da', 'user4': '9cc3b32090f301aa2a2467f714623ee645fb91bea872181639a3bf8b5a24b50d', 'user6': 'f6a851c2ae7edf22fa3c8cdb46b6c74771d5ac8da2ff9afa11f561002b611d79'},
+    {'files': '7cb9129a0b138217bf8f320a70b0643a5477d2cc5dbf2021c8adbae63312f2bc', 'ip4': '35e35e3027222cdfaf089b6944cfe51d4dfd7b577783ba975c6d99021ddbf64d', 'ip6': 'cadc28e581f343d2f3443d4af3998eb08d81d356311b18c8f3a879619b7a8698', 'nft': '3c89bd114202a84222101301fd25c061877d45d32751ff0f513d2525d13c8143', 'user4': '25493247488f4b575019dd857968c874b61394c86aa4e075f18da9b59639b6d2', 'user6': '5ce4c65944298841692ce3166e9a166fa59379392422a8ce0979858b8a776eda'},
 )
 
 

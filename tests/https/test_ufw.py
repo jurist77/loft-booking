@@ -22,14 +22,18 @@ def add(data, port, families=(4, 6)):
         nf = "ip" if version == 4 else "ip6"; user = ("ufw" if version == 4 else "ufw6") + "-user-input"
         data["ip"+str(version)] = data["ip"+str(version)].replace("COMMIT", f"-A {user} -p tcp -m tcp --dport {port} -j ACCEPT\nCOMMIT")
         zero = "0.0.0.0/0" if version == 4 else "::/0"
-        data["user"+str(version)] = data["user"+str(version)].replace("COMMIT", f"### tuple ### allow tcp {port} {zero} any {zero} in\n-A {user} -p tcp --dport {port} -j ACCEPT\nCOMMIT")
+        raw=data["user"+str(version)];marker="### END RULES ###" if "### END RULES ###" in raw else "COMMIT"
+        data["user"+str(version)] = raw.replace(marker, f"### tuple ### allow tcp {port} {zero} any {zero} in\n-A {user} -p tcp --dport {port} -j ACCEPT\n"+marker)
         nft["nftables"].append(fixtures.nft_allow(nf, user, port))
         data["ufw"] += f"{port}/tcp ALLOW IN Anywhere\n"
     data["nft"] = json.dumps(nft)
 
 
 class Fixture:
-    def __init__(self): self.data = fixtures.fixture(); self.writes = []; self.after = None
+    def __init__(self):
+        self.data = fixtures.fixture(); self.writes = []; self.after = None
+        for v in (4,6):
+            self.data['user'+str(v)] = self.data['user'+str(v)].replace('### tuple ###','### RULES ###\n### tuple ###',1).replace('COMMIT','### END RULES ###\nCOMMIT')
     def take(self): return copy.deepcopy(self.data)
     def operation(self, before, apply, port, families):
         if apply:
@@ -172,6 +176,21 @@ class FirewallTests(unittest.TestCase):
         ref=fw.F.stock_shape(data);fw.F.stock_nft_profile(data,profiles=(ref,))
         rule['expr'].insert(0,{'xt':{'type':'match','name':'owner'}});data['nft']=json.dumps(nf)
         with self.assertRaises(fw.F.Unsafe):fw.F.stock_nft_profile(data,profiles=(ref,))
+
+    def test_persisted_insert_is_only_a_pinned_footer_never_an_executed_rule(self):
+        data=Fixture().take();template,body=fw.F.stock_user_file(data['user4'],4)
+        self.assertEqual(body['filter']['rules'][0][1],'ufw-user-input')
+        changed=data['user4'].replace('COMMIT','-I ufw-logging-deny -j RETURN\nCOMMIT')
+        other,parsed=fw.F.stock_user_file(changed,4)
+        self.assertNotEqual(template,other);self.assertEqual(body,parsed)
+        data['user4']=changed
+        with self.assertRaises(fw.F.Unsafe):fw.F.stock_nft_profile(data)
+        bad=changed.replace('### END RULES ###','-I ufw-user-input -j ACCEPT\n### END RULES ###')
+        with self.assertRaises(fw.F.Unsafe):fw.F.stock_user_file(bad,4)
+        before=Fixture().take();after=copy.deepcopy(before);add(after,80)
+        self.assertTrue(fw.F.expected_delta(before,after,'nft',80))
+        after['user4']=after['user4'].replace('COMMIT','-I ufw-logging-deny -j RETURN\nCOMMIT')
+        self.assertFalse(fw.F.persistent_delta(before['user4'],after['user4'],4,80))
 
     def test_bundled_module_and_all_safe_codes_are_in_protocol(self):
         source=h.workflow.source()
