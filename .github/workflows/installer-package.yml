@@ -105,6 +105,7 @@ jobs:
           download({'x86_64':'x64','aarch64':'arm64'}[platform.machine()],root/'caddy.tar.gz')
           PYVALIDATE
           sudo env STUDIO_CADDY_VALIDATE_CI=1 GITHUB_ACTIONS=true python3 tests/https/production_validate.py --archive "$RUNNER_TEMP/studio-production-caddy/caddy.tar.gz"
+          python3 -B tests/https/full_archive_transport.py --archive "$RUNNER_TEMP/studio-production-caddy/caddy.tar.gz"
       - name: Browser CA tooling on disposable CI runner only
         run: |
           if ! command -v certutil >/dev/null; then
