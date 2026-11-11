@@ -139,6 +139,26 @@ def nft_hook_features(key, rules):
     return sorted(features)
 
 
+def nft_iptables_names(text, family):
+    # Only establish chain-name correspondence; never interpret an invalid
+    # iptables view as proof that a chain exists exclusively in nftables.
+    if type(text) is not str or len(text)>2*1024**2: raise ValueError()
+    visible=set();table=None
+    for line in text.splitlines():
+        if not line or line.startswith('#'):continue
+        if line.startswith('*') and table is None:
+            table=line[1:]
+            if not re.fullmatch(r'[A-Za-z0-9_-]+',table):raise ValueError()
+        elif line=='COMMIT' and table is not None:table=None
+        elif line.startswith(':') and table is not None:
+            match=re.fullmatch(r':([^\s]+)\s+(?:ACCEPT|DROP|-)\s+\[\d+:\d+\]',line)
+            if not match:raise ValueError()
+            visible.add((family,table,match[1]))
+        elif not (line.startswith('-A ') and table is not None):raise ValueError()
+    if table is not None:raise ValueError()
+    return visible
+
+
 def nft_hooks_summary(nft_raw, ip4, ip6, units=''):
     entries = nft_document(nft_raw); chains = {}; rules = {}; objects={k:0 for k in NFT_OBJECTS}
     for item in entries:
@@ -155,13 +175,7 @@ def nft_hooks_summary(nft_raw, ip4, ip6, units=''):
     if set(rules) - set(chains): raise ValueError()
     base = [key for key, chain in chains.items() if 'hook' in chain]
     if len(base) > 32: raise NftAuditError()
-    visible = set()
-    for family, text in (('ip', ip4), ('ip6', ip6)):
-        table = None
-        for line in text.splitlines():
-            if line.startswith('*'): table = line[1:]
-            elif line.startswith(':') and table: visible.add((family, table, line.split()[0][1:]))
-            elif line == 'COMMIT': table = None
+    visible = nft_iptables_names(ip4,'ip') | nft_iptables_names(ip6,'ip6')
     result = []
     for index, key in enumerate(base):
         chain = chains[key]

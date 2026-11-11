@@ -46,6 +46,13 @@ class HookTests(unittest.TestCase):
         self.assertNotIn(CANARY,json.dumps(data));self.assertNotIn('198.51.100.77',json.dumps(data))
         self.assertTrue(probe.valid_nft_audit(data))
 
+    def test_invalid_iptables_view_is_not_misclassified_as_a_native_only_hook(self):
+        raw=json.dumps({'nftables':[chain()]})
+        for bad in (CANARY,'*filter\n:INPUT DROP [0:0]\n',':INPUT DROP [0:0]\nCOMMIT\n'):
+            result=probe.audit_nft_hooks(lambda name:('ok',raw if name=='nft' else bad))
+            self.assertEqual(result['state'],'DATA_INVALID')
+            self.assertEqual(result['hooks'],[])
+
     def test_tcp_drop_on_443_does_not_claim_effect_on_22_or_80(self):
         h=summary(chain(),rule(port(443),{'drop':None}))['hooks'][0]
         self.assertEqual(h['tcp'],{'22':[],'80':[],'443':['DROP_POSSIBLE']})
