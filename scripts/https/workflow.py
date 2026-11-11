@@ -111,12 +111,32 @@ class Session:
         self.interface_diagnostics = interface_diagnostics if interface_diagnostics is not None else []
         self.firewall_diagnostics = firewall_diagnostics if firewall_diagnostics is not None else []
 
+    def receive(self):
+        try: data = os.read(self.child.stdout.fileno(), 8193)
+        except BlockingIOError: return
+        if not data:
+            try: code = self.child.wait(timeout=1)
+            except subprocess.TimeoutExpired: code = None
+            raise HttpsError("SSH_AUTH_FAILED" if code == 5 else "SSH_CONNECTION_FAILED" if code == 255 else "SSH_CLOSED_OUTCOME_UNKNOWN")
+        require(len(self.buffer) + len(data) <= 8192, "INVALID_REMOTE_PROTOCOL")
+        self.buffer += data
+
     def write(self, data, timeout=120):
-        end = time.monotonic() + timeout; view = memoryview(data)
+        started = time.monotonic(); end = started + timeout; view = memoryview(data)
         while view:
-            require(time.monotonic() < end, "SSH_INPUT_TIMEOUT")
-            if select.select([], [self.child.stdin], [], min(1, max(0, end-time.monotonic())))[1]:
-                try: view = view[os.write(self.child.stdin.fileno(), view[:65536]):]
+            if time.monotonic() >= end:
+                error = HttpsError("SSH_INPUT_TIMEOUT")
+                error.upload = (len(data)-len(view), len(data), int(time.monotonic()-started), len(self.buffer))
+                raise error
+            # SSH channels share flow-control resources. Drain bounded stdout
+            # while feeding stdin; record() later validates the same FIFO bytes.
+            readable, writable, _ = select.select([self.child.stdout], [self.child.stdin], [], min(1, max(0, end-time.monotonic())))
+            if readable: self.receive()
+            if writable:
+                try:
+                    written = os.write(self.child.stdin.fileno(), view[:65536])
+                    require(written > 0, "SSH_CLOSED_OUTCOME_UNKNOWN")
+                    view = view[written:]
                 except BlockingIOError: continue
                 except BrokenPipeError: raise HttpsError("SSH_CLOSED_OUTCOME_UNKNOWN") from None
 
@@ -125,13 +145,7 @@ class Session:
         while b"\n" not in self.buffer:
             require(time.monotonic() < end, "SSH_EVENT_TIMEOUT_OUTCOME_UNKNOWN")
             if select.select([self.child.stdout], [], [], min(1, max(0, end-time.monotonic())))[0]:
-                data = os.read(self.child.stdout.fileno(), 8193)
-                if not data:
-                    try: code = self.child.wait(timeout=1)
-                    except subprocess.TimeoutExpired: code = None
-                    raise HttpsError("SSH_AUTH_FAILED" if code == 5 else "SSH_CONNECTION_FAILED" if code == 255 else "SSH_CLOSED_OUTCOME_UNKNOWN")
-                require(len(self.buffer) + len(data) <= 8192, "INVALID_REMOTE_PROTOCOL")
-                self.buffer += data
+                self.receive()
         line, self.buffer = self.buffer.split(b"\n", 1)
         try: value = json.loads(line)
         except ValueError: raise HttpsError("INVALID_REMOTE_PROTOCOL") from None
@@ -148,6 +162,7 @@ class Session:
                 stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, start_new_session=True,
                 env={"PATH": os.environ.get("PATH", "/usr/bin:/bin"), "LC_ALL": "C", "SSHPASS": self.ssh.password})
             os.set_blocking(self.child.stdin.fileno(), False)
+            os.set_blocking(self.child.stdout.fileno(), False)
             self.write(packet)
             end = time.monotonic() + self.limit
             while True:
@@ -225,7 +240,19 @@ class Session:
                 # HTTPS result. Timer recovery covers SIGKILL/reboot/partition.
                 failure = sys.exc_info()[0] is not None
                 self.child.stdin.close()
-                try: self.child.wait(timeout=90)
+                # Keep the existing recovery grace period, but don't wait with
+                # an unread pipe: the peer may flush diagnostics while handling
+                # EOF/rollback. Discard bounded chunks, never accumulate/log them.
+                end = time.monotonic() + 90; readable = True
+                while self.child.poll() is None and time.monotonic() < end:
+                    if readable:
+                        if select.select([self.child.stdout], [], [], min(1, max(0, end-time.monotonic())))[0]:
+                            try: readable = bool(os.read(self.child.stdout.fileno(), 8193))
+                            except BlockingIOError: pass
+                    else:
+                        try: self.child.wait(timeout=min(1, max(0, end-time.monotonic())))
+                        except subprocess.TimeoutExpired: pass
+                try: self.child.wait(timeout=max(0, end-time.monotonic()))
                 except subprocess.TimeoutExpired:
                     os.killpg(self.child.pid, signal.SIGTERM)
                     try: self.child.wait(timeout=10)
@@ -309,6 +336,11 @@ def main():
             kind = getattr(error, "error_kind", None)
             if type(kind) is not str or kind not in ERROR_KINDS: kind = "EXPECTED" if isinstance(error, HttpsError) else error_kind(error)
             with open(os.environ["GITHUB_STEP_SUMMARY"], "a") as out: out.write("## Studio HTTPS — FAILED\n\nSafe code: `"+code+"`; phase: `"+phase+"`; kind: `"+kind+"`. No success claimed. On transport loss run check after the recovery timer; never force an HTTP downgrade.\n")
+            upload = getattr(error, "upload", None)
+            if (code == "SSH_INPUT_TIMEOUT" and type(upload) is tuple and len(upload) == 4 and
+                    all(type(v) is int and v >= 0 for v in upload)):
+                with open(os.environ["GITHUB_STEP_SUMMARY"], "a") as out:
+                    out.write("\nSSH input: bytes accepted by local pipe="+str(upload[0])+"/"+str(upload[1])+"; elapsed_seconds="+str(upload[2])+"; buffered_stdout_bytes="+str(upload[3])+". Local pipe acceptance does not prove remote receipt or operation outcome.\n")
         return 1
 
     finally:
