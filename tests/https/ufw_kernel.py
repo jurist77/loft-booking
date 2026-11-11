@@ -97,6 +97,19 @@ def inside():
             # Real parser/serializer and read-only admission against complete
             # stock Ubuntu chains. No mocked kernel or mocked UFW in this test.
             before=fw.take();fingerprint=fw.fingerprint(before)
+            # Synthetic namespace data only. Never export host firewall or
+            # protected files. Kept as a reproducible CI fixture on failure.
+            if output := os.environ.get('STUDIO_UFW_FIXTURE_OUT'):
+                selected={key:before[key] for key in ('ip4','ip6','legacy4','legacy6','nft','user4','user6','ufw','version4','version6')}
+                Path(output).write_text(json.dumps(selected,sort_keys=True))
+            for port in (22,80,443):
+                for family in (4,6):
+                    try:fw.F.ip_profile(before['ip'+str(family)],family,port,True)
+                    except fw.F.Unsafe:
+                        print(f'CI_UFW_IP{family}_PORT{port}_PROOF_REJECTED',flush=True);raise
+                try:fw.F.nft_profile(before['nft'],'nft',port,True)
+                except fw.F.Unsafe:
+                    print(f'CI_UFW_NFT_PORT{port}_PROOF_REJECTED',flush=True);raise
             assert fw.inspect(['192.0.2.1'])['firewall_plan']==[80,443]
             assert fw.fingerprint(fw.take())==fingerprint,'CI_CHECK_MUTATED_FIREWALL'
             print('CI_UFW_PHASE_VERIFIED_APPEND',flush=True)

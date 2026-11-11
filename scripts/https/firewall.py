@@ -28,7 +28,9 @@ READS = ("ufw", "nft", "ip4", "ip6", "legacy4", "legacy6", "version4", "version6
 
 
 def read(name):
-    if name == "ufw": return F.read_host(name)  # no CLI lock/capability-test writes
+    if name == "ufw":
+        try: return F.read_host(name)  # no CLI lock/capability-test writes
+        except F.Unsafe as error: raise HttpsError("HTTPS_UFW_" + error.code) from None
     commands = {key: F.HOST_COMMANDS[key] for key in READS}
     for key in ("ip4", "ip6", "legacy4", "legacy6"):
         commands[key] = (*commands[key], "-M", "/bin/false")
