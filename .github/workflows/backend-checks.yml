@@ -15,7 +15,7 @@ concurrency:
 
 jobs:
   backend:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     env:
       NEXT_TELEMETRY_DISABLED: "1"
     steps:
@@ -24,7 +24,7 @@ jobs:
           persist-credentials: false
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
         with:
-          node-version: "24"
+          node-version: "24.12.0"
           cache: npm
       - run: npm ci
       - run: npm test
@@ -44,7 +44,7 @@ jobs:
       - name: Prove static DEMO ignores database configuration
         run: npm run test:demo:isolation
       - name: Install browser for real SERVER and DEMO client journeys
-        run: npx playwright install --with-deps chromium
+        run: bash scripts/ci/install-browser.sh
       - name: Verify real SQLite SERVER UI and unchanged static DEMO
         run: |
           export CHROMIUM_PATH="$(node --input-type=module -e 'import { chromium } from "@playwright/test"; process.stdout.write(chromium.executablePath());')"

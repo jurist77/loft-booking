@@ -40,8 +40,11 @@ jobs:
           cache: npm
       - name: Encryption tooling on disposable runner only
         run: |
-          sudo apt-get update -qq
-          sudo apt-get install -y --no-install-recommends gnupg
+          if ! command -v gpg >/dev/null; then
+            sudo apt-get -o Acquire::Retries=3 -o APT::Update::Error-Mode=any update -qq
+            sudo apt-get -o Acquire::Retries=3 install -y --no-install-recommends gnupg
+          fi
+          command -v gpg >/dev/null
       - name: Installer security and transport unit tests
         run: python3 -m unittest discover -s tests/installer -p 'test_*.py' -v
       - run: npm ci
@@ -56,8 +59,16 @@ jobs:
         env:
           STUDIO_SOURCE_SHA: ${{ inputs.source_sha }}
         run: python3 scripts/installer/package.py --version "$STUDIO_SOURCE_SHA" --output "$RUNNER_TEMP/server.tar.gz"
+      # Keep selected app/lockfile intact, but obtain this CI helper from the
+      # reviewed workflow revision even when restoring a pre-helper release.
+      - name: Checkout current reviewed lifecycle controls independently of selected app version
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: ${{ github.workflow_sha }}
+          path: .studio-verified-control
+          persist-credentials: false
       - name: Install browser on the disposable release runner
-        run: npx playwright install --with-deps chromium
+        run: bash .studio-verified-control/scripts/ci/install-browser.sh
       - name: Require real browser journeys from the exact release package
         run: |
           python3 - <<'PY'
@@ -72,12 +83,6 @@ jobs:
           export STUDIO_E2E_RELEASE_ROOT="$browser_package"
           export CHROMIUM_PATH="$(node --input-type=module -e 'import { chromium } from "@playwright/test"; process.stdout.write(chromium.executablePath());')"
           npm run test:server:browser
-      - name: Checkout current reviewed lifecycle controls independently of selected app version
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
-        with:
-          ref: ${{ github.workflow_sha }}
-          path: .studio-verified-control
-          persist-credentials: false
       - name: Use current controls for old-version restore acceptance; keep immutable app archive unchanged
         run: |
           python3 - <<'PY'
@@ -102,8 +107,11 @@ jobs:
           sudo env STUDIO_CADDY_VALIDATE_CI=1 GITHUB_ACTIONS=true python3 tests/https/production_validate.py --archive "$RUNNER_TEMP/studio-production-caddy/caddy.tar.gz"
       - name: Browser CA tooling on disposable CI runner only
         run: |
-          sudo apt-get update -qq
-          sudo apt-get install -y --no-install-recommends libnss3-tools
+          if ! command -v certutil >/dev/null; then
+            sudo apt-get -o Acquire::Retries=3 -o APT::Update::Error-Mode=any update -qq
+            sudo apt-get -o Acquire::Retries=3 install -y --no-install-recommends libnss3-tools
+          fi
+          command -v certutil >/dev/null
       - name: Require real Caddy TLS, browser SQLite flow, recovery timer and HTTPS-aware update/restore
         env:
           STUDIO_SOURCE_SHA: ${{ inputs.source_sha }}
