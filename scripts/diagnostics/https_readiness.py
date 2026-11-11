@@ -181,7 +181,9 @@ def nft_report_table(remote):
     audit=remote.get('nft_hooks') if type(remote) is dict else None
     if not valid_nft_audit(audit):return '\nNFT inventory unavailable; no safety conclusion.\n'
     if audit['state']!='OBSERVED':return '\nNFT inventory: '+audit['state']+'; no safety conclusion.\n'
+    objects=', '.join(k+': '+str(v) for k,v in audit['objects'].items() if v) or 'none observed'
     lines=['\n### NFT hooks — возможное влияние, не разрешение apply\n',
+        'Other nft object kinds (names/contents omitted): '+objects+'. These can independently trigger the current ADDITIONAL_NFT_FILTERING guard.\n',
         '| ID | Family / hook / priority | View | Назначение | TCP 22 | TCP 80 | TCP 443 |',
         '|---|---|---|---|---|---|---|']
     for h in audit['hooks']:

@@ -36,6 +36,16 @@ class HookTests(unittest.TestCase):
         self.assertEqual(data['creator'],'NOT_PROVEN')
         runner.validate(fixture({'nft':json.dumps({'nftables':[chain()]})}))
 
+    def test_extra_objects_are_counted_without_assuming_the_error_means_a_hook(self):
+        data=summary(chain(),{'set':{'family':'inet','table':CANARY,'name':CANARY,'elem':['198.51.100.77']}},
+                     {'flowtable':{'family':'inet','table':CANARY,'name':CANARY,'hook':'ingress'}},
+                     {'counter':{'name':CANARY,'bytes':12345}})
+        self.assertEqual(data['objects']['set'],1)
+        self.assertEqual(data['objects']['flowtable'],1)
+        self.assertEqual(data['objects']['counter'],1)
+        self.assertNotIn(CANARY,json.dumps(data));self.assertNotIn('198.51.100.77',json.dumps(data))
+        self.assertTrue(probe.valid_nft_audit(data))
+
     def test_tcp_drop_on_443_does_not_claim_effect_on_22_or_80(self):
         h=summary(chain(),rule(port(443),{'drop':None}))['hooks'][0]
         self.assertEqual(h['tcp'],{'22':[],'80':[],'443':['DROP_POSSIBLE']})

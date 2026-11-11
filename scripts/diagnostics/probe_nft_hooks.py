@@ -15,6 +15,8 @@ NFT_EFFECTS = ('ACCEPT_OBSERVED', 'DROP_POSSIBLE', 'REJECT_POSSIBLE', 'NAT_POSSI
                'TPROXY_POSSIBLE', 'MARK_OR_TRACKING_POSSIBLE', 'UNKNOWN_REVIEW_REQUIRED')
 NFT_STATES = ('OBSERVED', 'READ_FAILED', 'DATA_INVALID', 'LIMIT_EXCEEDED', 'SNAPSHOT_CHANGED')
 NFT_FEATURES = ('NAT', 'TPROXY', 'MARK_OR_TRACKING', 'OPAQUE_XT', 'INDIRECT_MAP', 'UNKNOWN')
+NFT_OBJECTS = ('set', 'map', 'counter', 'flowtable', 'quota', 'limit', 'ct helper',
+               'ct timeout', 'ct expectation', 'synproxy', 'other')
 
 
 class NftAuditError(Exception):
@@ -138,7 +140,7 @@ def nft_hook_features(key, rules):
 
 
 def nft_hooks_summary(nft_raw, ip4, ip6, units=''):
-    entries = nft_document(nft_raw); chains = {}; rules = {}
+    entries = nft_document(nft_raw); chains = {}; rules = {}; objects={k:0 for k in NFT_OBJECTS}
     for item in entries:
         if 'chain' in item:
             chain = item['chain']; key = tuple(chain.get(k) for k in ('family', 'table', 'name'))
@@ -148,6 +150,8 @@ def nft_hooks_summary(nft_raw, ip4, ip6, units=''):
             rule = item['rule']; key = tuple(rule.get(k) for k in ('family', 'table', 'chain'))
             if not all(type(v) is str for v in key) or type(rule.get('expr')) is not list: raise ValueError()
             rules.setdefault(key, []).append(rule['expr'])
+        elif not any(kind in item for kind in ('metainfo','table')):
+            kind=next(iter(item));objects[kind if kind in objects else 'other']+=1
     if set(rules) - set(chains): raise ValueError()
     base = [key for key, chain in chains.items() if 'hook' in chain]
     if len(base) > 32: raise NftAuditError()
@@ -179,11 +183,12 @@ def nft_hooks_summary(nft_raw, ip4, ip6, units=''):
             'iptables_view': 'CHAIN_NAME_PRESENT' if key in visible else 'NFT_ONLY',
             'origin_hint': hint, 'purpose': purpose, 'features': features, 'tcp': ports})
     vpn = any(re.match(r'^(?:xray|x-ui|3x-ui)\.service\s+loaded\s+active\s', line) for line in units.splitlines())
-    return {'state': 'OBSERVED', 'creator': 'NOT_PROVEN', 'vpn_unit_active': vpn, 'hooks': result}
+    return {'state': 'OBSERVED', 'creator': 'NOT_PROVEN', 'vpn_unit_active': vpn, 'objects': objects, 'hooks': result}
 
 
 def audit_nft_hooks(run, units=''):
-    failed = {'state': 'READ_FAILED', 'creator': 'NOT_PROVEN', 'vpn_unit_active': False, 'hooks': []}
+    failed = {'state': 'READ_FAILED', 'creator': 'NOT_PROVEN', 'vpn_unit_active': False,
+              'objects': {k:0 for k in NFT_OBJECTS}, 'hooks': []}
     try:
         names = ('nft', 'iptables', 'ip6tables')
         first = {name: run(name) for name in names}
@@ -204,9 +209,12 @@ def audit_nft_hooks(run, units=''):
 
 def valid_nft_audit(value):
     # Exact output vocabulary: runner rejects unexpected strings/identities.
-    if type(value) is not dict or set(value) != {'state', 'creator', 'vpn_unit_active', 'hooks'}: return False
+    if type(value) is not dict or set(value) != {'state', 'creator', 'vpn_unit_active', 'objects', 'hooks'}: return False
     if value['state'] not in NFT_STATES or value['creator'] != 'NOT_PROVEN' or type(value['vpn_unit_active']) is not bool: return False
     hooks = value['hooks']
+    objects=value['objects']
+    if type(objects) is not dict or set(objects)!=set(NFT_OBJECTS) or any(type(v) is not int or not 0<=v<=20000 for v in objects.values()): return False
+    if value['state']!='OBSERVED' and any(objects.values()):return False
     if type(hooks) is not list or len(hooks) > 32 or value['state'] != 'OBSERVED' and hooks: return False
     for i, h in enumerate(hooks):
         if type(h) is not dict or set(h) != {'id','family','hook','type','priority','policy','iptables_view','origin_hint','purpose','features','tcp'}: return False
