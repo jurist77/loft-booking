@@ -221,10 +221,23 @@ def firewall_plan(data, port=3000, allow_existing=False):
     if backend == "nft":
         empty_tables(data["legacy4"]); empty_tables(data["legacy6"])
     elif saved_tables(data["legacy4"]) != saved_tables(data["ip4"]) or saved_tables(data["legacy6"]) != saved_tables(data["ip6"]): raise Unsafe("MIXED_OR_UNKNOWN_BACKEND")
+    # nft JSON hides xt payloads. For this exact reviewed stock domain use a
+    # complete two-view/profile proof, not the generic symbolic interpreter.
+    entries = json.loads(data["nft"])["nftables"]
+    stock = allow_existing and backend == "nft" and any("xt" in expr for item in entries if "rule" in item for expr in item["rule"]["expr"])
+    if stock: stock_nft_profile(data)
     needed = []
     for version in (4, 6):
-        profile = ip_profile(data["ip" + str(version)], version, port, allow_existing)
-        if allow_existing and profile[1]: needed.append(version)
+        if stock:
+            user = ("ufw" if version == 4 else "ufw6") + "-user-input"
+            # stock_nft_profile has already restricted and correlated EVERY
+            # user rule to an unconditional, single-port TCP/UDP ACCEPT.
+            rules = saved_tables(data["ip" + str(version)])["filter"]["rules"]
+            opened = any(r[1] == user and r[r.index("-p")+1] == "tcp" and int(r[r.index("--dport")+1]) == port for r in rules if r[1] == user)
+            if not opened: needed.append(version)
+        else:
+            profile = ip_profile(data["ip" + str(version)], version, port, allow_existing)
+            if allow_existing and profile[1]: needed.append(version)
         # Pending/different persisted rules could turn an add into replacement.
         active = saved_tables(data["ip" + str(version)])["filter"]
         saved = saved_tables(data["user" + str(version)])["filter"]
@@ -245,11 +258,7 @@ def firewall_plan(data, port=3000, allow_existing=False):
                 t = t[:9] + t[11:]
             if len(t) != 10 or t[3] != "allow" or t[4] not in ("tcp", "udp") or not t[5].isdigit() or (not allow_existing and t[5] == str(port)) or t[7] != "any" or t[9] not in ("in", "out"):
                 raise Unsafe("PERSISTED_RULES_DIFFER")
-    try: nft = nft_profile(data["nft"], backend, port, allow_existing)
-    except Unsafe:
-        if not allow_existing or backend != "nft": raise
-        entries = stock_nft_profile(data)
-        nft = entries, {v: v in needed for v in (4, 6)}
+    nft = (entries, {v: v in needed for v in (4, 6)}) if stock else nft_profile(data["nft"], backend, port, allow_existing)
     if allow_existing and backend == "nft" and nft[1] != {v: v in needed for v in (4, 6)}: raise Unsafe("PATH_NOT_PROVEN")
     return backend, tuple(needed)
 

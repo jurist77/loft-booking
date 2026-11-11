@@ -60,6 +60,9 @@ def inside():
         run(['ip','link','set','lo','up'])
         run(['ufw','allow','OpenSSH']);run(['ufw','allow','4444/tcp'])
         run(['ufw','allow','51820/udp']);run(['ufw','--force','enable'])
+        mode=os.environ['STUDIO_CI_UFW_LOGGING'];assert mode in ('low','off')
+        if mode=='off':run(['ufw','logging','off'])
+        print('CI_UFW_LOGGING_PROFILE_'+mode.upper(),flush=True)
         fw.F.ufw_implementation()
         peer=subprocess.Popen(['unshare','--net','--','python3','-c','import time;time.sleep(600)'],stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL)
         try:
@@ -99,11 +102,6 @@ def inside():
             # Real parser/serializer and read-only admission against complete
             # stock Ubuntu chains. No mocked kernel or mocked UFW in this test.
             before=fw.take();fingerprint=fw.fingerprint(before)
-            print('CI_REVIEWED_STOCK_PROFILE_LOW_'+json.dumps(fw.F.stock_shape(before),sort_keys=True),flush=True)
-            run(['ufw','logging','off'])
-            print('CI_REVIEWED_STOCK_PROFILE_OFF_'+json.dumps(fw.F.stock_shape(fw.take()),sort_keys=True),flush=True)
-            run(['ufw','logging','low'])
-            before=fw.take();fingerprint=fw.fingerprint(before)
             assert fw.inspect(['192.0.2.1'])['firewall_plan']==[80,443]
             assert fw.fingerprint(fw.take())==fingerprint,'CI_CHECK_MUTATED_FIREWALL'
             print('CI_UFW_PHASE_VERIFIED_APPEND',flush=True)
@@ -127,15 +125,16 @@ def main():
     assert sys.argv[1:]==[]
     before=host_fingerprint()
     env={**os.environ,'STUDIO_CI_PARENT_NET':os.readlink('/proc/self/ns/net'),'STUDIO_CI_PARENT_MNT':os.readlink('/proc/self/ns/mnt')}
-    process=subprocess.Popen(['unshare','--mount','--net','--fork','--propagation','private','--',sys.executable,str(Path(__file__).resolve()),'--inside'],env=env,start_new_session=True)
-    try:result=process.wait(timeout=240)
-    finally:
-        if process.poll() is None:
-            os.killpg(process.pid,signal.SIGTERM)
-            try:process.wait(timeout=10)
-            except subprocess.TimeoutExpired:os.killpg(process.pid,signal.SIGKILL);process.wait()
-        assert host_fingerprint()==before,'CI_HOST_FIREWALL_OR_CONFIGURATION_CHANGED'
-    assert result==0,'CI_ISOLATED_UFW_FAILED'
+    for mode in ('low','off'):
+        process=subprocess.Popen(['unshare','--mount','--net','--fork','--propagation','private','--',sys.executable,str(Path(__file__).resolve()),'--inside'],env={**env,'STUDIO_CI_UFW_LOGGING':mode},start_new_session=True)
+        try:result=process.wait(timeout=240)
+        finally:
+            if process.poll() is None:
+                os.killpg(process.pid,signal.SIGTERM)
+                try:process.wait(timeout=10)
+                except subprocess.TimeoutExpired:os.killpg(process.pid,signal.SIGKILL);process.wait()
+            assert host_fingerprint()==before,'CI_HOST_FIREWALL_OR_CONFIGURATION_CHANGED'
+        assert result==0,'CI_ISOLATED_UFW_FAILED'
 
 
 if __name__=='__main__':
