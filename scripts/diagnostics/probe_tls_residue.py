@@ -26,6 +26,9 @@ TLS_CHECKS = ('metadata','fingerprints','identity','empty_data','no_state','depe
 TLS_REASONS = ('NOT_CHECKED','READ_OR_LIMIT_FAILED','REFERENCE_INVALID','METADATA_MISMATCH',
     'UNEXPECTED_OBJECT','STATE_REQUIRES_PRESERVATION','FINGERPRINT_MISMATCH','IDENTITY_MISMATCH',
     'DEPENDENCY_FOUND','DEPENDENCY_REVIEW_REQUIRED','SNAPSHOT_CHANGED','STUDIO_NOT_HEALTHY','MATCHED_PINNED_PREPARE')
+TLS_IDENTITY_DETAILS = ('NOT_CHECKED','USER_MISSING','SYSTEM_UID_MISMATCH','SYSTEM_GID_MISMATCH',
+    'USER_NAME_MISMATCH','HOME_MISMATCH','SHELL_MISMATCH','PRIMARY_GROUP_MISMATCH',
+    'EXTRA_GROUP_MEMBERSHIP','UID_OR_GID_ALIAS','LOOKUP_FAILED','EXPECTED_PROFILE')
 
 
 class TlsBlocked(Exception):
@@ -35,7 +38,7 @@ class TlsBlocked(Exception):
 def tls_empty_report():
     return {'status':'BLOCKED','reason':'NOT_CHECKED','checks':{key:'NOT_CHECKED' for key in TLS_CHECKS},
         'objects':{key:{'kind':'unknown','owner':'unknown','group':'unknown','mode':0} for key in ('base','config','data')},
-        'account':'unknown','preservation_required':True}
+        'account':'unknown','identity_detail':'NOT_CHECKED','preservation_required':True}
 
 
 class TlsResidueInspector:
@@ -112,19 +115,24 @@ class TlsResidueInspector:
     def metadata(self):
         try:account=self.account(TLS_USER)
         except KeyError:
-            self.report['account']='missing';self.block('IDENTITY_MISMATCH')
+            self.report.update(account='missing',identity_detail='USER_MISSING');self.block('IDENTITY_MISMATCH')
         self.uid,self.gid=account.pw_uid,account.pw_gid
         all_groups=self.groups()
-        if not (0<self.uid<1000 and 0<self.gid<1000 and self.uid!=self.root_uid and
-                account.pw_name==TLS_USER and account.pw_dir=='/nonexistent' and account.pw_shell=='/usr/sbin/nologin' and
-                [g.gr_name for g in all_groups if g.gr_gid==self.gid]==[TLS_USER] and
-                all(not g.gr_mem for g in all_groups if g.gr_gid==self.gid) and
-                not any(TLS_USER in g.gr_mem for g in all_groups)):
-            self.report['account']='unsafe';self.block('IDENTITY_MISMATCH')
+        checks=((0<self.uid<1000 and self.uid!=self.root_uid,'SYSTEM_UID_MISMATCH'),
+            (0<self.gid<1000,'SYSTEM_GID_MISMATCH'),(account.pw_name==TLS_USER,'USER_NAME_MISMATCH'),
+            (account.pw_dir=='/nonexistent','HOME_MISMATCH'),(account.pw_shell=='/usr/sbin/nologin','SHELL_MISMATCH'),
+            ([g.gr_name for g in all_groups if g.gr_gid==self.gid]==[TLS_USER] and
+                all(not g.gr_mem for g in all_groups if g.gr_gid==self.gid),'PRIMARY_GROUP_MISMATCH'),
+            (not any(TLS_USER in g.gr_mem for g in all_groups),'EXTRA_GROUP_MEMBERSHIP'))
+        for passed,code in checks:
+            if not passed:
+                self.report.update(account='unsafe',identity_detail=code);self.block('IDENTITY_MISMATCH')
         # No second passwd identity may alias the dedicated uid or primary gid.
         if self.root==Path('/') and any(p.pw_name!=TLS_USER and (p.pw_uid==self.uid or p.pw_gid==self.gid) for p in pwd.getpwall()):
+            self.report['identity_detail']='UID_OR_GID_ALIAS'
             self.block('IDENTITY_MISMATCH')
         self.report['account']='expected'
+        self.report['identity_detail']='EXPECTED_PROFILE'
         self.report['checks']['identity']='MATCH'
         expected=((self.root_uid,self.root_uid),(self.root_uid,self.gid),(self.uid,self.gid))
         for key,name,(uid,gid) in zip(('base','config','data'),TLS_ROOTS,expected):
@@ -304,7 +312,7 @@ class TlsResidueInspector:
                 if self.seen[name]!=before:self.block('SNAPSHOT_CHANGED')
             self.report['checks']['stable']='MATCH'
             self.report.update(status='MATCHED_FAILED_PREPARE',reason='MATCHED_PINNED_PREPARE',preservation_required=False)
-        except KeyError:self.report.update(status='BLOCKED',reason='IDENTITY_MISMATCH',preservation_required=True)
+        except KeyError:self.report.update(status='BLOCKED',reason='IDENTITY_MISMATCH',identity_detail='LOOKUP_FAILED',preservation_required=True)
         except TlsBlocked as error:self.report.update(status='BLOCKED',reason=str(error),preservation_required=True)
         except (OSError,ValueError,TypeError,IndexError,RecursionError):self.report.update(status='BLOCKED',reason='READ_OR_LIMIT_FAILED',preservation_required=True)
         return self.report

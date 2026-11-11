@@ -133,7 +133,11 @@ class SSH:
                 "-o", "ServerAliveInterval=15", "-o", "ServerAliveCountMax=3",
                 self.user + "@" + self.address, command]
 
-    def execute(self, command, stream=None, timeout=45, output_file=None):
+    def execute(self, command, stream=None, timeout=45, output_file=None, output_limit=10000):
+        # Installer callers retain their original 10k limit. A bounded larger
+        # read-only inventory may explicitly opt in; never an unlimited reply.
+        if type(output_limit) is not int or not 1 <= output_limit <= 65536:
+            raise DeployError("REMOTE_PROTOCOL_FAILED")
         child = None
         try:
             child = subprocess.Popen(self.arguments(command), stdin=stream, stdout=output_file if output_file else subprocess.PIPE,
@@ -152,7 +156,7 @@ class SSH:
                 if child.returncode:
                     raise DeployError("REMOTE_SNAPSHOT_FAILED")
                 return {"status": "DOWNLOADED"}
-            if len(output) > 10000:
+            if len(output) > output_limit:
                 raise DeployError("REMOTE_PROTOCOL_FAILED")
             try:
                 value = json.loads(output)

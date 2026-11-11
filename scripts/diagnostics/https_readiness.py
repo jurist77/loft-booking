@@ -16,16 +16,18 @@ from deploy import SSH, DeployError, server_ip
 from probe_studio_network import (deadline, READ_STATES, LOAD_STATES, ACTIVE_STATES, SUB_STATES, HEALTH_ERRORS)
 from studio_network import ProtocolError, SSH_ERRORS, health_valid
 from probe_https_readiness import UNITS, TOOLS, PATHS, META, PROGRAMS
-from probe_tls_residue import TLS_CHECKS, TLS_REASONS
+from probe_tls_residue import TLS_CHECKS, TLS_REASONS, TLS_IDENTITY_DETAILS
+from probe_nft_hooks import valid_nft_audit
 
 REMOTE_COMMAND = "python3 -I -B -S -"
 SCHEMA = {
     "status": ("OBSERVED",),
+    "nft_hooks": valid_nft_audit,
     "tls_residue": {"status": ("BLOCKED", "MATCHED_FAILED_PREPARE"), "reason": TLS_REASONS,
         "checks": {key:("NOT_CHECKED","MATCH") for key in TLS_CHECKS},
         "objects": {key:{"kind": ("unknown","directory","other"), "owner": ("unknown","root","tls","other"),
             "group": ("unknown","root","tls","other"), "mode": lambda v:type(v) is int and 0<=v<=0o7777} for key in ("base","config","data")},
-        "account": ("unknown","missing","unsafe","expected"), "preservation_required": bool},
+        "account": ("unknown","missing","unsafe","expected"), "identity_detail": TLS_IDENTITY_DETAILS, "preservation_required": bool},
     "host": {"root": bool, "ubuntu24": bool, "arch": ("x64", "arm64", "unsupported"), "clock_sync": ("yes", "no", "unknown")},
     "studio": {"service": {"read": READ_STATES, "LoadState": LOAD_STATES, "ActiveState": ACTIVE_STATES, "SubState": SUB_STATES},
         "listener_owned": bool, "snapshot_stable": bool, "bind_proof": ("native_ipv4", "native_ipv6", "ipv4_dual_stack", "unconfirmed"),
@@ -65,9 +67,10 @@ def payload():
     bindings = (HERE.parent / "firewall/bindings.py").read_text()
     probe = (HERE / "probe_https_readiness.py").read_text().split('\nif __name__ == "__main__":')[0]
     residue = (HERE / 'probe_tls_residue.py').read_text()
+    hooks = (HERE / 'probe_nft_hooks.py').read_text()
     reference = json.loads((HERE / 'https-residue-reference.json').read_text())
     return (base + "\nclass Unsafe(Exception): pass\n" + bindings + "\n" + residue +
-            '\nTLS_RESIDUE_REFERENCE='+repr(reference)+'\n'+probe+
+            '\nTLS_RESIDUE_REFERENCE='+repr(reference)+'\n'+hooks+'\n'+probe+
             '\ntry: print(json.dumps(collect(), sort_keys=True))\nexcept Exception: print(\'{"status":"PROBE_UNAVAILABLE"}\')\n').encode()
 
 
@@ -137,7 +140,7 @@ def diagnose(address, password, ssh_factory=SSH, external=external_checks):
         ssh = ssh_factory(address, password)
         with tempfile.TemporaryFile(mode="w+b") as source:
             source.write(payload()); source.seek(0)
-            remote = validate(ssh.execute(REMOTE_COMMAND, source, timeout=150))
+            remote = validate(ssh.execute(REMOTE_COMMAND, source, timeout=150, output_limit=65536))
             health_valid(remote["studio"]["local_health"])
             if (remote["studio"]["listener_owned"] and not remote["studio"]["snapshot_stable"] or
                     remote["studio"]["bind_proof"] != "unconfirmed" and not remote["studio"]["listener_owned"]): raise ProtocolError()
@@ -164,6 +167,33 @@ def diagnose(address, password, ssh_factory=SSH, external=external_checks):
             "remote": remote, "external": observed, "changes": "none", "dns_hostname": "owner_input_required"}
 
 
+def residue_explanation(remote):
+    if not remote: return 'TLS_IDENTITY_NOT_ESTABLISHED'
+    residue=remote['tls_residue'];paths=remote['mechanisms']['paths']
+    if residue['identity_detail']=='USER_MISSING':
+        tracked=[v for k,v in paths.items() if k.startswith('studio_tls_')]
+        return 'TLS_USER_ABSENT_NO_TRACKED_OBJECTS_OBSERVED' if tracked and all(v=='missing' for v in tracked) else 'TLS_USER_ABSENT_OBJECTS_REQUIRE_REVIEW'
+    if residue['reason']=='IDENTITY_MISMATCH': return 'TLS_IDENTITY_PROFILE_REQUIRES_REVIEW'
+    return 'TLS_HISTORICAL_MATCH_ONLY_NOT_CLEANUP_AUTHORIZATION'
+
+
+def nft_report_table(remote):
+    audit=remote.get('nft_hooks') if type(remote) is dict else None
+    if not valid_nft_audit(audit):return '\nNFT inventory unavailable; no safety conclusion.\n'
+    if audit['state']!='OBSERVED':return '\nNFT inventory: '+audit['state']+'; no safety conclusion.\n'
+    objects=', '.join(k+': '+str(v) for k,v in audit['objects'].items() if v) or 'none observed'
+    lines=['\n### NFT hooks — возможное влияние, не разрешение apply\n',
+        'Other nft object kinds (names/contents omitted): '+objects+'. These can independently trigger the current ADDITIONAL_NFT_FILTERING guard.\n',
+        '| ID | Family / hook / priority | View | Назначение | TCP 22 | TCP 80 | TCP 443 |',
+        '|---|---|---|---|---|---|---|']
+    for h in audit['hooks']:
+        cells=[h['id'],h['family']+' / '+h['hook']+' / '+str(h['priority']),h['iptables_view'],h['purpose']]
+        cells.extend(', '.join(h['tcp'][str(p)]) or 'NO_EFFECT_OBSERVED_HERE' for p in (22,80,443))
+        lines.append('| '+' | '.join(cells)+' |')
+    if not audit['hooks']:lines.append('\nBase hooks не обнаружены в этом снимке.')
+    return '\n'.join(lines)+'\n'
+
+
 def emit(report):
     text = json.dumps(report, sort_keys=True, ensure_ascii=True, indent=2)
     print(text)
@@ -172,6 +202,10 @@ def emit(report):
             output.write("## Studio HTTPS readiness — READ ONLY\n\n" + VERDICTS.get(report.get("verdict"), "Audit failed; no changes attempted.") +
                 "\n\n```json\n" + text + "\n```\n\nNo installation authorization. No DNS/ACME issuance, direct database/booking access, service changes or firewall changes. Client names, IPs, credentials and configuration contents are omitted. Existing health performs its normal DB check. A green job means a report was produced.\n")
             output.write('\nTLS residue: BLOCKED means preserve everything. MATCHED_FAILED_PREPARE is a snapshot match to the pinned failed run, not cleanup/apply authorization. See docs/https-residue-audit.md; no quarantine or deletion is performed.\n')
+            output.write('\nIdentity interpretation: '+residue_explanation(report.get('remote'))+
+                '. USER_MISSING on an unprepared VPS is not evidence of leftover TLS files.\n')
+            output.write(nft_report_table(report.get('remote')))
+            output.write('\nNFT hooks: effects are conservative possibilities, NOT an allow/deny proof. CHAIN_NAME_PRESENT is only a name correspondence with iptables-save; NFT_ONLY identifies another view. Priorities must be interpreted per family/hook. Names/patterns and active Xray units do not establish ownership. No new HTTPS apply permission. See docs/https-nft-hook-diagnostics.md.\n')
 
 
 def main():

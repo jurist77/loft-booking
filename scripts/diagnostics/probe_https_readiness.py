@@ -15,6 +15,8 @@ import shutil
 import stat
 from types import FunctionType
 
+if 'audit_nft_hooks' not in globals():
+    from probe_nft_hooks import audit_nft_hooks
 if 'audit_tls_residue' not in globals():
     from probe_tls_residue import audit_tls_residue, tls_empty_report
     TLS_RESIDUE_REFERENCE = json.loads(Path(__file__).with_name('https-residue-reference.json').read_text())
@@ -48,6 +50,7 @@ HTTPS_COMMANDS = {
     "tls_unit_paths": ("systemctl", "show", "--property=UnitPath", "--value"),
 }
 UNITS = ("nginx.service", "caddy.service", "apache2.service", "haproxy.service", "traefik.service",
+         "xray.service", "x-ui.service", "3x-ui.service",
          "certbot.service", "certbot.timer", "snap.certbot.renew.timer", "acme-sh.service", "acme-sh.timer",
          "systemd-resolved.service", "named.service", "unbound.service", "dnsmasq.service", "ddclient.service", "duckdns.timer",
          "studio1925-tls.service", "studio1925-https-recover.service", "studio1925-https-recover.timer",
@@ -232,6 +235,7 @@ def collect(run=read_https, health=read_health, inspect=os.lstat, readlink=os.re
     unit_state, units = run("units")
     inventory = mechanisms(unit_state, units, available, inspect)
     tls_residue = (residue or (lambda: audit_tls_residue(TLS_RESIDUE_REFERENCE, run)))()
+    nft_hooks = audit_nft_hooks(run, units if unit_state == 'ok' else '')
     fresh_state, fresh_raw = run("service")
     fresh_units_state, fresh_units = run('units')
     fresh_health = health('127.0.0.1',3000)
@@ -245,7 +249,7 @@ def collect(run=read_https, health=read_health, inspect=os.lstat, readlink=os.re
             "managed_rootfs": bool(re.fullmatch(r"/opt/studio1925/releases/[A-Za-z0-9_.-]+/root", fields.get("RootDirectory", ""))) and fields.get("WorkingDirectory") == "/app",
             "private_network": fields.get("PrivateNetwork") if fields.get("PrivateNetwork") in ("yes", "no") else "unknown",
             "network_namespace": bool(fields.get("NetworkNamespacePath")), "drop_ins": bool(fields.get("DropInPaths"))},
-            "ports": web, "mechanisms": inventory, "tls_residue": tls_residue,
+            "ports": web, "mechanisms": inventory, "tls_residue": tls_residue, "nft_hooks": nft_hooks,
             "firewall": {name: firewall_summary(name, *run(name)) for name in ("ufw", "nft", "iptables", "ip6tables", "legacy4", "legacy6")}}
 
 
