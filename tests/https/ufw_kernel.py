@@ -10,6 +10,7 @@ import json
 import os
 from pathlib import Path
 import shutil
+import signal
 import socket
 import subprocess
 import sys
@@ -126,9 +127,15 @@ def main():
     assert sys.argv[1:]==[]
     before=host_fingerprint()
     env={**os.environ,'STUDIO_CI_PARENT_NET':os.readlink('/proc/self/ns/net'),'STUDIO_CI_PARENT_MNT':os.readlink('/proc/self/ns/mnt')}
-    result=subprocess.run(['unshare','--mount','--net','--fork','--propagation','private','--',sys.executable,str(Path(__file__).resolve()),'--inside'],env=env,timeout=240)
-    assert host_fingerprint()==before,'CI_HOST_FIREWALL_OR_CONFIGURATION_CHANGED'
-    assert result.returncode==0,'CI_ISOLATED_UFW_FAILED'
+    process=subprocess.Popen(['unshare','--mount','--net','--fork','--propagation','private','--',sys.executable,str(Path(__file__).resolve()),'--inside'],env=env,start_new_session=True)
+    try:result=process.wait(timeout=240)
+    finally:
+        if process.poll() is None:
+            os.killpg(process.pid,signal.SIGTERM)
+            try:process.wait(timeout=10)
+            except subprocess.TimeoutExpired:os.killpg(process.pid,signal.SIGKILL);process.wait()
+        assert host_fingerprint()==before,'CI_HOST_FIREWALL_OR_CONFIGURATION_CHANGED'
+    assert result==0,'CI_ISOLATED_UFW_FAILED'
 
 
 if __name__=='__main__':

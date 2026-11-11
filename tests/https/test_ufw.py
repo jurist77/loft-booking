@@ -129,6 +129,25 @@ class FirewallTests(unittest.TestCase):
             self.assertNotIn('prepare',fixture.ops.calls);self.assertNotIn('cutover',fixture.ops.calls)
             self.assertEqual(fixture.installer.UNIT.read_text(),'old-unit')
 
+    def test_opaque_compatibility_requires_both_pinned_stock_views_and_exact_user_rule_correlation(self):
+        f=Fixture();data=f.take();reference=fw.F.stock_shape(data)
+        # This toy fixture is not the production stock reference.
+        with self.assertRaisesRegex(fw.F.Unsafe,'STANDARD_UFW_PROFILE_UNCONFIRMED'):fw.F.stock_nft_profile(data)
+        rules=fw.F.stock_nft_profile(data,profiles=(reference,));self.assertTrue(rules)
+        add(data,80);add(data,443)
+        self.assertEqual(fw.F.stock_shape(data),reference)
+        fw.F.stock_nft_profile(data,profiles=(reference,))
+        for changed in ('user','base','files','count'):
+            bad=copy.deepcopy(data);nf=json.loads(bad['nft'])
+            if changed=='user':
+                item=next(r['rule'] for r in nf['nftables'] if 'rule' in r and r['rule']['chain']=='ufw-user-input')
+                item['expr'].insert(0,{'xt':{'type':'match','name':'conntrack'}})
+            elif changed=='base':nf['nftables'].append({'chain':{'family':'inet','table':'foreign','name':'OTHER'}})
+            elif changed=='files':bad['protected']['/etc/ufw/before.rules']='00'
+            else:nf['nftables'].append(copy.deepcopy(next(r for r in nf['nftables'] if 'rule' in r and r['rule']['chain']=='ufw-user-input')))
+            bad['nft']=json.dumps(nf)
+            with self.assertRaises(fw.F.Unsafe):fw.F.stock_nft_profile(bad,profiles=(reference,))
+
     def test_bundled_module_and_all_safe_codes_are_in_protocol(self):
         source=h.workflow.source()
         self.assertIn(b"'studio_firewall'",source);self.assertIn(b"'firewall'",source)

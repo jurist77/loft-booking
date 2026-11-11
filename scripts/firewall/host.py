@@ -14,7 +14,7 @@ import sys
 if "COMMANDS" not in globals():  # Normal imports in fixture tests; payload embeds these.
     sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "diagnostics"))
     from probe_studio_network import COMMANDS, LIMIT, read_command, read_health, service_summary, ufw_summary, deadline
-    from rules import Unsafe, saved_tables, empty_tables, ip_rule, ip_profile, nft_profile, clean_nft, expected_delta, stock_shape
+    from rules import Unsafe, saved_tables, empty_tables, ip_rule, ip_profile, nft_profile, clean_nft, expected_delta, stock_shape, stock_nft_profile
     from bindings import listener_records, listener_ownership, studio_owns, bind_proof
     import json
     import re
@@ -245,7 +245,11 @@ def firewall_plan(data, port=3000, allow_existing=False):
                 t = t[:9] + t[11:]
             if len(t) != 10 or t[3] != "allow" or t[4] not in ("tcp", "udp") or not t[5].isdigit() or (not allow_existing and t[5] == str(port)) or t[7] != "any" or t[9] not in ("in", "out"):
                 raise Unsafe("PERSISTED_RULES_DIFFER")
-    nft = nft_profile(data["nft"], backend, port, allow_existing)
+    try: nft = nft_profile(data["nft"], backend, port, allow_existing)
+    except Unsafe:
+        if not allow_existing or backend != "nft": raise
+        entries = stock_nft_profile(data)
+        nft = entries, {v: v in needed for v in (4, 6)}
     if allow_existing and backend == "nft" and nft[1] != {v: v in needed for v in (4, 6)}: raise Unsafe("PATH_NOT_PROVEN")
     return backend, tuple(needed)
 

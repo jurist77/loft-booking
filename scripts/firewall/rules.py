@@ -264,3 +264,59 @@ def stock_shape(data):
                           'rules':{'/'.join(k):v for k,v in chains.items()}})
     result['files']=digest({name:data['protected'][name] for name in ('/etc/ufw/before.rules','/etc/ufw/before6.rules','/etc/ufw/after.rules','/etc/ufw/after6.rules')})
     return result
+
+
+# Reviewed Ubuntu 24.04 UFW 0.36.2-6 stock kernel profiles. Filled from the
+# isolated official-package CI reference, never from the target VPS itself.
+# Reference: CI 42994817792, independent x64/ARM64 outputs agree. low/off.
+STANDARD_UFW_PROFILES = (
+    {'files': '7cb9129a0b138217bf8f320a70b0643a5477d2cc5dbf2021c8adbae63312f2bc', 'ip4': '5277d00b029c6aaf684bc8fef8b769df64b7f9102bb17ecae88bbc10f457f69c', 'ip6': 'fee641b9764e16633862e0f2d0931234e30b69827024c772d1414e5cc87917cd', 'nft': '1390889094e4e83a3c29cb526466f88f3de1a229e66f1ec6be394db3348133da'},
+    {'files': '7cb9129a0b138217bf8f320a70b0643a5477d2cc5dbf2021c8adbae63312f2bc', 'ip4': '35e35e3027222cdfaf089b6944cfe51d4dfd7b577783ba975c6d99021ddbf64d', 'ip6': 'cadc28e581f343d2f3443d4af3998eb08d81d356311b18c8f3a879619b7a8698', 'nft': '3c89bd114202a84222101301fd25c061877d45d32751ff0f513d2525d13c8143'},
+)
+
+
+def stock_nft_profile(data, profiles=STANDARD_UFW_PROFILES):
+    """Prove opaque xt compatibility data without guessing hidden parameters.
+
+    Stock non-user chains must match BOTH decoded iptables and nft topology/
+    expressions, plus original before/after files. Only simple per-port user
+    allows are variable and each is correlated, in order, across both views.
+    This narrow fallback does not interpret arbitrary xt extensions.
+    """
+    if stock_shape(data) not in profiles: raise Unsafe('STANDARD_UFW_PROFILE_UNCONFIRMED')
+    entries = json.loads(data['nft'])['nftables']
+    observed = {}
+    users = ('ufw-user-input','ufw-user-output','ufw6-user-input','ufw6-user-output')
+    for item in entries:
+        if 'rule' not in item: continue
+        r=item['rule']
+        if r['chain'] not in users: continue
+        if set(r)-{'family','table','chain','expr','handle','comment'}: raise Unsafe('STANDARD_UFW_USER_RULE_UNCONFIRMED')
+        observed.setdefault((r['family'],r['table'],r['chain']),[]).append(r)
+    expected_keys=set()
+    for family,nf,prefix in ((4,'ip','ufw'),(6,'ip6','ufw6')):
+        table=saved_tables(data['ip'+str(family)])['filter']
+        for suffix in ('input','output'):
+            chain=prefix+'-user-'+suffix;key=(nf,'filter',chain);expected_keys.add(key)
+            ip_rules=[r for r in table['rules'] if r[1]==chain]; nft_rules=observed.get(key,[])
+            if len(ip_rules)!=len(nft_rules):raise Unsafe('STANDARD_UFW_USER_RULE_UNCONFIRMED')
+            for args,native in zip(ip_rules,nft_rules):
+                args=args[:];i=2
+                while i<len(args):
+                    if args[i:i+2] in (['-m','tcp'],['-m','udp']):del args[i:i+2]
+                    else:i+=1
+                if len(args) not in (8,12) or args[:3]!=['-A',chain,'-p'] or args[3] not in ('tcp','udp') or args[4]!='--dport' or not args[5].isdigit() or not 1<=int(args[5])<=65535 or args[-2:]!=['-j','ACCEPT']:
+                    raise Unsafe('STANDARD_UFW_USER_RULE_UNCONFIRMED')
+                proto,port=args[3],int(args[5]);comment=len(args)==12
+                if comment and (args[6:10]!=['-m','comment','--comment','dapp_OpenSSH'] or proto!='tcp' or port!=22):raise Unsafe('STANDARD_UFW_USER_RULE_UNCONFIRMED')
+                if native.get('comment') not in (None,'dapp_OpenSSH' if comment else None):raise Unsafe('STANDARD_UFW_USER_RULE_UNCONFIRMED')
+                expr=[clean_nft(v) for v in native['expr'] if set(v)!={'counter'}]
+                match={'match':{'op':'==','left':{'payload':{'protocol':proto,'field':'dport'}},'right':port}}
+                tail=([{'xt':{'type':'match','name':'comment'}}] if comment else [])+[{'accept':None}]
+                candidates=[[match,*tail]]
+                candidates.append([{'match':{'op':'==','left':{'meta':{'key':'l4proto'}},'right':proto}},match,*tail])
+                if family==4:
+                    candidates.append([{'match':{'op':'==','left':{'payload':{'protocol':'ip','field':'protocol'}},'right':6 if proto=='tcp' else 17}},match,*tail])
+                if json.dumps(expr,sort_keys=True) not in {json.dumps(c,sort_keys=True) for c in candidates}:raise Unsafe('STANDARD_UFW_USER_RULE_UNCONFIRMED')
+    if set(observed)-expected_keys:raise Unsafe('STANDARD_UFW_USER_RULE_UNCONFIRMED')
+    return entries
