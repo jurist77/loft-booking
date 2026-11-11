@@ -54,12 +54,12 @@ class AuditedUFWTests(unittest.TestCase):
         patch_value(self.common, "do_checks", False)
         # Assert no actual process, including reads, can be launched by UFW.
         self.real_popen = patch("subprocess.Popen", side_effect=AssertionError("real subprocess forbidden")); self.real_popen.start()
-        def kernel(argv, allow_append=False):
+        def kernel(argv, allow_append=False, port=3000):
             self.commands.append(argv[:]); args = argv[1:]
             if args in (["--version"], ["-V"]): return 0, "iptables v1.8.10 (nf_tables)"
             if args[:1] in (["-L"], ["-n"]): return 0, ""
             if argv[0] == "sysctl" and args in (["net.ipv4.ip_forward"], ["net.ipv6.conf.default.forwarding"], ["net.ipv6.conf.all.forwarding"]): return 0, args[0] + " = 1"
-            if args[:1] == ["-A"] and args[1] in ("ufw-user-input", "ufw6-user-input") and args[2:] == ["-p", "tcp", "--dport", "3000", "-j", "ACCEPT"]: return 0, ""
+            if args[:1] == ["-A"] and args[1] in ("ufw-user-input", "ufw6-user-input") and args[2:] == ["-p", "tcp", "--dport", str(port), "-j", "ACCEPT"]: return 0, ""
             raise AssertionError("forbidden firewall command")
         for module in (self.util, self.backend_ip): patch_value(module, "cmd", kernel)
         patch_value(host, "ufw_io", kernel)
@@ -102,6 +102,26 @@ class AuditedUFWTests(unittest.TestCase):
             self.assertTrue(host.persistent_delta(self.data["user" + str(version)], new, version))
         for command in self.commands:
             self.assertFalse(any(arg in command for arg in ("-N", "-D", "-F", "-X", "-I", "-P", "reload", "reset")))
+
+    def test_https_serializer_only_appends_missing_ports_and_skips_existing_families(self):
+        for port in (80, 443):
+            before = {v: (self.root / "etc/ufw" / ("user.rules" if v == 4 else "user6.rules")).read_text() for v in (4, 6)}
+            host.ufw_operation(self.data, apply=False, port=port)
+            for v in (4, 6): self.assertEqual((self.root / "etc/ufw" / ("user.rules" if v == 4 else "user6.rules")).read_text(), before[v])
+            host.ufw_operation(self.data, apply=True, port=port)
+            for v in (4, 6):
+                text = (self.root / "etc/ufw" / ("user.rules" if v == 4 else "user6.rules")).read_text()
+                self.assertTrue(host.persistent_delta(before[v], text, v, port))
+                self.data["user"+str(v)] = text
+        # Re-run the official CLI for a port present in IPv4 only.
+        path = self.root / "etc/ufw/user6.rules"
+        text = path.read_text()
+        text = "\n".join(line for line in text.splitlines() if not line.startswith("### tuple ### allow tcp 80 ") and not line.startswith("-A ufw6-user-input -p tcp --dport 80 ")) + "\n"
+        path.write_text(text); self.data["user6"] = text
+        host.ufw_operation(self.data, apply=False, port=80, families=(6,))
+        host.ufw_operation(self.data, apply=True, port=80, families=(6,))
+        self.assertTrue(host.persistent_delta(text, path.read_text(), 6, 80))
+        self.assertFalse(any(arg in command for command in self.commands for arg in ("-D", "-I", "-F", "-X", "-P", "reload")))
 
     def test_unrepresented_persisted_rule_aborts_plan_without_changes(self):
         path = self.root / "etc/ufw/user.rules"

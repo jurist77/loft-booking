@@ -1,4 +1,4 @@
-"""Root transaction. Only Studio-owned paths/units; NEVER firewall writes.
+"""Root transaction. Studio paths/units plus separately proved TCP/80/443 allows.
 
 The caller holds the install lock. Recovery uses the same lock and a durable
 checkpoint. SQLite is not restored, copied or opened by this controller.
@@ -25,6 +25,7 @@ from configuration import (BASE, ETC, DATA, USER, SERVICE, RECOVERY_SERVICE, REC
                            MONITOR_TIMER, MONITOR_SERVICE, UNIT_DIR, caddy_config, service, auxiliary_units, inputs)
 from checks import require, HttpsError, https_health
 from inventory import snapshot, read, own_listeners
+import firewall
 from probe_studio_network import deadline
 from phase_report import Progress, error_kind, INPUT_ERROR_CODES
 
@@ -282,6 +283,14 @@ def apply(options, archive, source, ops=None, emit=event, ack=acknowledge, probe
         require(not I.https_settings(state) or I.https_settings(state)["hostname"] == options["hostname"], "HTTPS_HOSTNAME_CHANGE_REQUIRES_REVIEW")
         require(not owner or owner["hostname"] == options["hostname"], "HTTPS_HOSTNAME_CHANGE_REQUIRES_REVIEW")
         facts = ops.inspector(state, options["addresses"], bool(owner and owner["committed"]), allow_stopped=True)
+        added = facts.get("firewall_plan", [])
+        if added:
+            # DNS/ownership/local API and both dry plans already passed. No TLS
+            # preparation or Studio restart occurs before the verified append.
+            expected = firewall.enable(facts["firewall"], added, options["addresses"])
+            facts = ops.inspector(state, options["addresses"], bool(owner and owner["committed"]), allow_stopped=True)
+            require(facts["firewall"] == expected and not facts.get("firewall_plan"), "HTTPS_FIREWALL_CHANGE_UNCONFIRMED_REVIEW_REQUIRED")
+            emit("firewall-result", ports=added)
         if owner and owner["committed"]:
             require(I.https_settings(state) == {"format": 1, "hostname": options["hostname"]}, "HTTPS_STATE_DISAGREES")
             if facts["tls_stopped"]:
@@ -293,7 +302,7 @@ def apply(options, archive, source, ops=None, emit=event, ack=acknowledge, probe
             changed = facts["tls_stopped"] or any(I.run(["systemctl", "is-enabled", unit], check=False) != 0 for unit in (SERVICE, MONITOR_TIMER, RECOVERY_TIMER))
             I.run(["systemctl", "enable", SERVICE, MONITOR_TIMER, RECOVERY_TIMER], "TLS_ENABLE_FAILED")
             I.run(["systemctl", "start", MONITOR_TIMER, RECOVERY_TIMER], "TLS_MONITOR_START_FAILED")
-            emit("result", status="SUCCESS", operation="https-service-recovered" if changed else "already-https", changes="studio-tls-only" if changed else "none")
+            emit("result", status="SUCCESS", operation="https-service-recovered" if changed else "already-https", changes="studio-tls-and-ufw" if added else "studio-tls-only" if changed else "none", firewall_added=added)
             return
         # Every active admission check runs BEFORE changing installed Studio.
         with probe(options["nonce"], options["addresses"]):
@@ -315,7 +324,7 @@ def apply(options, archive, source, ops=None, emit=event, ack=acknowledge, probe
             ack("cutover-ready", options["nonce"])
             ops.commit(checkpoint, current, new_state)
             committed = True
-            emit("result", status="SUCCESS", operation="https-enabled", changes="studio-tls-only")
+            emit("result", status="SUCCESS", operation="https-enabled", changes="studio-tls-and-ufw" if added else "studio-tls-only", firewall_added=added)
         except BaseException as original:
             if committed: raise HttpsError("HTTPS_COMMITTED_RESULT_UNCONFIRMED_CHECK_AGAIN") from None
             try: ops.rollback(checkpoint)
@@ -364,8 +373,9 @@ def entry(options=None, archive=b"", source=""):
             progress.mark("CHECK_LOCAL_TLS")
             certificate = https_health(normalized["hostname"], "127.0.0.1") if owner and owner["committed"] and not facts["tls_stopped"] else None
             status = "CHECK_CANDIDATE_ACTIVE_PROOF_REQUIRED" if not owner or not owner["committed"] else "CHECK_MANAGED_TLS_STOPPED" if facts["tls_stopped"] else "CHECK_EXISTING_HTTPS"
+            if owner and owner["committed"] and facts.get("firewall_plan"): status = "CHECK_FIREWALL_PLAN_REQUIRED"
             progress.mark("CHECK_COMPLETE")
-            event("result", status=status, arch=facts["arch"], changes="none", certificate=certificate, port=state["port"])
+            event("result", status=status, arch=facts["arch"], changes="none", certificate=certificate, port=state["port"], firewall_plan=facts.get("firewall_plan", []))
         else: apply(normalized, archive, source)
         return 0
     except BaseException as error:

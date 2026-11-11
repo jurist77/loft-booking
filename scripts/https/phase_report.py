@@ -2,7 +2,7 @@
 import json
 
 MODULES = ('transport_settings', 'backup', 'maintenance', 'studio_installer',
-           'probe_studio_network', 'rules', 'bindings', 'configuration', 'checks', 'inventory', 'host')
+           'probe_studio_network', 'rules', 'bindings', 'studio_firewall', 'configuration', 'checks', 'firewall', 'inventory', 'host')
 READS = ('service', 'caddy', 'sockets4', 'sockets6', 'web4', 'web6', 'interfaces',
          'ufw', 'nft', 'ip4', 'ip6', 'legacy4', 'legacy6')
 REMOTE_PHASES = frozenset({

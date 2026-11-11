@@ -19,9 +19,9 @@ on:
         type: choice
         options: [check, apply]
         default: check
-        description: "check reads only; apply performs active port proof and managed cutover"
+        description: "check reads only; apply may append proved missing UFW TCP 80/443, then verifies TLS cutover"
       confirmation:
-        description: "For apply type exactly ENABLE STUDIO HTTPS"
+        description: "ENABLE STUDIO HTTPS confirms managed TLS and only proved missing TCP 80/443 UFW allows"
         type: string
         required: false
 

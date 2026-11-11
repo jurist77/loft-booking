@@ -1,4 +1,4 @@
-"""Read-only admission: only a proved empty host firewall, never a summary bypass."""
+"""Read-only admission: proved empty firewall or audited standard UFW paths."""
 import hashlib
 import ipaddress
 import json
@@ -12,6 +12,7 @@ from bindings import listener_records, listener_ownership, studio_owns
 from configuration import SERVICE, UNIT_DIR
 from checks import require, HttpsError, acme_ready
 from probe_studio_network import LIMIT
+import firewall
 
 COMMANDS = {
     "service": ("systemctl", "show", I.SERVICE, "--property=LoadState", "--property=ActiveState", "--property=SubState", "--property=MainPID", "--property=FragmentPath", "--property=DropInPaths"),
@@ -28,6 +29,7 @@ COMMANDS = {
 
 
 def read(name, port=3000):
+    if name == "ufw": return firewall.read("ufw")
     commands = {**COMMANDS, **{f"sockets{f}": tuple(str(port) if arg == "3000" else ":" + str(port) if arg == ":3000" else arg for arg in COMMANDS[f"sockets{f}"]) for f in (4, 6)}}
     return FunctionType(read_command.__code__, {**read_command.__globals__, "COMMANDS": commands})(name)
 
@@ -153,7 +155,7 @@ def snapshot(state, addresses, managed_tls=False, run=read, outbound=acme_ready,
         require(status == "ok", "PREFLIGHT_READ_INCOMPLETE")
         data[name] = raw
     mark("CHECK_FIREWALL")
-    fingerprint = empty_firewall(data)
+    firewall_facts = firewall.inspect(addresses) if ufw_summary("ok", data["ufw"])["active"] == "active" else {"firewall": empty_firewall(data), "firewall_plan": []}
     mark("CHECK_SERVICE")
     service, pid = service_summary("ok", data["service"])
     own_unit(data["service"], I.UNIT)
@@ -190,4 +192,4 @@ def snapshot(state, addresses, managed_tls=False, run=read, outbound=acme_ready,
         if name == "caddy" and not managed_tls: continue
         status, fresh = run(name, state["port"])
         require(status == "ok" and fresh == data[name], "PREFLIGHT_STATE_CHANGED")
-    return {"arch": I.host_facts()["arch"], "firewall": fingerprint, "public": sorted(public), "port": state["port"], "tls_stopped": stopped}
+    return {"arch": I.host_facts()["arch"], **firewall_facts, "public": sorted(public), "port": state["port"], "tls_stopped": stopped}
