@@ -14,7 +14,7 @@ import sys
 if "COMMANDS" not in globals():  # Normal imports in fixture tests; payload embeds these.
     sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "diagnostics"))
     from probe_studio_network import COMMANDS, LIMIT, read_command, read_health, service_summary, ufw_summary, deadline
-    from rules import Unsafe, saved_tables, empty_tables, ip_rule, ip_profile, nft_profile, clean_nft, expected_delta
+    from rules import Unsafe, saved_tables, empty_tables, ip_rule, ip_profile, nft_profile, clean_nft, expected_delta, stock_shape
     from bindings import listener_records, listener_ownership, studio_owns, bind_proof
     import json
     import re

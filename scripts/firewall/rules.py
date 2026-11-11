@@ -4,6 +4,7 @@ No firewall commands here. Unsupported constructs fail closed; summaries are NOT
 used as authorization. Both the iptables and native nft views must prove the path.
 """
 import copy
+import hashlib
 import json
 import re
 import shlex
@@ -239,3 +240,27 @@ def expected_delta(before, after, backend, port=3000, families=(4, 6)):
             del new[candidates[-1]]
     legacy_same = all(saved_tables(before[key]) == saved_tables(after[key]) for key in ("legacy4", "legacy6")) if backend == "nft" else all(saved_tables(after["legacy" + str(v)]) == saved_tables(after["ip" + str(v)]) for v in (4, 6))
     return old == new and legacy_same and before["protected"] == after["protected"]
+
+
+# In iptables-nft compatibility mode nft JSON intentionally omits xt payloads.
+# Both canonical views must match a reviewed stock profile, not merely the word
+# "xt". User allow rules are excluded here and verified separately rule-by-rule.
+def stock_shape(data):
+    def digest(value):return hashlib.sha256(json.dumps(value,sort_keys=True).encode()).hexdigest()
+    def user(chain):return chain in ('ufw-user-input','ufw-user-output','ufw6-user-input','ufw6-user-output')
+    result={}
+    for family in (4,6):
+        tables=saved_tables(data['ip'+str(family)])
+        grouped={name:{'chains':t['chains'],'rules':{chain:[r for r in t['rules'] if r[1]==chain] for chain in t['chains'] if not user(chain)}} for name,t in tables.items()}
+        result['ip'+str(family)]=digest(grouped)
+    topology=[];chains={}
+    for item in json.loads(data['nft'])['nftables']:
+        if set(item)=={'metainfo'}:continue
+        if set(item) in ({'table'},{'chain'}):topology.append(clean_nft(item));continue
+        if set(item)!={'rule'}:raise Unsafe('ADDITIONAL_NFT_FILTERING')
+        r=item['rule']
+        if not user(r['chain']):chains.setdefault((r['family'],r['table'],r['chain']),[]).append(clean_nft(r))
+    result['nft']=digest({'topology':sorted(topology,key=lambda x:json.dumps(x,sort_keys=True)),
+                          'rules':{'/'.join(k):v for k,v in chains.items()}})
+    result['files']=digest({name:data['protected'][name] for name in ('/etc/ufw/before.rules','/etc/ufw/before6.rules','/etc/ufw/after.rules','/etc/ufw/after6.rules')})
+    return result
