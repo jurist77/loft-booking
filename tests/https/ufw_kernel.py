@@ -17,6 +17,7 @@ import sys
 import tempfile
 import threading
 import time
+import traceback
 
 ROOT = Path(__file__).resolve().parents[2]
 sys.path[:0] = [str(ROOT/'scripts/https'),str(ROOT/'scripts/firewall'),str(ROOT/'scripts/diagnostics'),str(ROOT/'scripts/installer')]
@@ -137,11 +138,24 @@ def main():
         assert result==0,'CI_ISOLATED_UFW_FAILED'
 
 
+def safe_frames(error):
+    seen=set()
+    while error is not None and id(error) not in seen:
+        seen.add(id(error))
+        for frame in traceback.extract_tb(error.__traceback__):
+            if Path(frame.filename).name in ('rules.py','host.py','firewall.py','ufw_kernel.py'):
+                # This fixture's known code location only, no exception text,
+                # locals, source lines, paths or raw firewall data.
+                name=frame.name if frame.name in ('saved_tables','firewall_plan','stock_nft_profile','ip_profile','nft_profile','prove','walk','ufw_operation','plan','inspect','inside','main') else 'HELPER'
+                print('CI_UFW_FRAME_'+Path(frame.filename).stem.upper()+'_'+name.upper()+'_'+str(frame.lineno),flush=True)
+        error=error.__context__
+
+
 if __name__=='__main__':
     try:main()
-    except fw.F.Unsafe as error:print('CI_UFW_BLOCKED_'+error.code,flush=True);raise SystemExit(1) from None
-    except fw.HttpsError as error:print('CI_UFW_BLOCKED_'+str(error),flush=True);raise SystemExit(1) from None
+    except fw.F.Unsafe as error:safe_frames(error);print('CI_UFW_BLOCKED_'+error.code,flush=True);raise SystemExit(1) from None
+    except fw.HttpsError as error:safe_frames(error);print('CI_UFW_BLOCKED_'+str(error),flush=True);raise SystemExit(1) from None
     except Exception as error:
-        # Only our own fixed assertion codes; never argv/raw rules/addresses.
+        safe_frames(error)
         print(str(error) if isinstance(error,AssertionError) and str(error).startswith('CI_') else 'CI_UFW_KERNEL_FAILED',flush=True)
         raise SystemExit(1) from None
