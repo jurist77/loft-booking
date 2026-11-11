@@ -26,9 +26,14 @@ from artifacts import RELEASE, download
 from phase_report import (REMOTE_PHASES, RUNNER_PHASES, ERROR_KINDS, report as phase_report, error_kind,
                           valid_interface_result, interface_report)
 
-SAFE_REMOTE_CODES = SAFE_CODES | {"HTTPS_BOOTSTRAP_FAILED"} | {node.value for name in ("host", "inventory", "checks", "configuration")
+SAFE_REMOTE_CODES = SAFE_CODES | {"HTTPS_BOOTSTRAP_FAILED"} | {node.value for name in ("host", "inventory", "checks", "configuration", "firewall")
     for node in ast.walk(ast.parse((HERE / (name + ".py")).read_text()))
     if isinstance(node, ast.Constant) and type(node.value) is str and re.fullmatch(r"[A-Z0-9_]{1,100}", node.value)}
+
+# Only codes statically present in the audited engine/parsers can cross SSH.
+SAFE_REMOTE_CODES |= {"HTTPS_UFW_" + node.value for name in ("host", "rules")
+    for node in ast.walk(ast.parse((HERE.parent / "firewall" / (name + ".py")).read_text()))
+    if isinstance(node, ast.Constant) and type(node.value) is str and re.fullmatch(r"[A-Z0-9_]{1,60}", node.value)}
 
 
 SAFE_RUNNER_CODES = SAFE_REMOTE_CODES | {node.value for path in (Path(__file__), HERE.parent / "installer/transport_settings.py")
@@ -88,8 +93,9 @@ def source():
     paths.update({name: HERE.parent / "installer" / (filename + ".py") for name, filename in
              (("transport_settings", "transport_settings"), ("backup", "backup"), ("maintenance", "maintenance"), ("studio_installer", "remote"))})
     paths.update({"probe_studio_network": HERE.parent / "diagnostics/probe_studio_network.py",
-                  "rules": HERE.parent / "firewall/rules.py", "bindings": HERE.parent / "firewall/bindings.py"})
-    paths.update({name: HERE / (name + ".py") for name in ("configuration", "checks", "inventory", "host")})
+                  "rules": HERE.parent / "firewall/rules.py", "bindings": HERE.parent / "firewall/bindings.py",
+                  "studio_firewall": HERE.parent / "firewall/host.py"})
+    paths.update({name: HERE / (name + ".py") for name in ("configuration", "checks", "firewall", "inventory", "host")})
     modules = {name: path.read_text() for name, path in paths.items()}
     prefix = "import sys,types,json\nfor _name,_code in " + repr(modules) + ".items():\n if '_STUDIO_OPTIONS' in globals(): print(json.dumps({'event':'phase','phase':'MODULE_'+_name.upper()}),flush=True)\n _module=types.ModuleType(_name);_module.__file__='/opt/studio1925-https/'+_name+'.py';sys.modules[_name]=_module;exec(compile(_code,_name,'exec'),_module.__dict__)\n"
     prefix += "sys.modules['host'].RELEASE=" + repr(RELEASE) + "\n"
@@ -99,10 +105,11 @@ def source():
 
 
 class Session:
-    def __init__(self, ssh, limit=1000, diagnostics=None, interface_diagnostics=None):
+    def __init__(self, ssh, limit=1000, diagnostics=None, interface_diagnostics=None, firewall_diagnostics=None):
         self.ssh, self.limit, self.child, self.buffer = ssh, limit, None, b""
         self.diagnostics = diagnostics if diagnostics is not None else []
         self.interface_diagnostics = interface_diagnostics if interface_diagnostics is not None else []
+        self.firewall_diagnostics = firewall_diagnostics if firewall_diagnostics is not None else []
 
     def write(self, data, timeout=120):
         end = time.monotonic() + timeout; view = memoryview(data)
@@ -133,7 +140,7 @@ class Session:
 
     def run(self, options, archive=b"", verify=None):
         require(options.get("mode") in ("check", "apply"), "INVALID_REMOTE_PROTOCOL")
-        history = []; phase_count = 0; interface_count = 0
+        history = []; phase_count = 0; interface_count = 0; firewall_added = []
         cutover = ["ports-probe", "certificate-ready", "cutover-ready"]
         code = source(); packet = json.dumps({"code_size": len(code), "archive_size": len(archive), "options": options}).encode()+b"\n"+code+archive
         try:
@@ -147,6 +154,12 @@ class Session:
                 require(time.monotonic() < end, "SSH_OPERATION_TIMEOUT_OUTCOME_UNKNOWN")
                 event = self.record(min(360, end-time.monotonic()))
                 phase = event.get("event")
+                if phase == "firewall-result":
+                    ports = event.get("ports")
+                    require(options["mode"] == "apply" and not history and not firewall_added and set(event) == {"event", "ports"} and type(ports) is list and ports and all(type(p) is int and p in (80, 443) for p in ports) and ports == sorted(set(ports)), "INVALID_REMOTE_PROTOCOL")
+                    firewall_added = ports[:]; self.firewall_diagnostics.append(ports[:])
+                    print("VERIFIED_UFW_MISSING_TCP_ALLOWS_ADDED: " + ",".join(map(str, ports)), flush=True)
+                    continue
                 if phase == "interface-result":
                     interface_count += 1
                     require(options["mode"] == "check" and interface_count == 1 and
@@ -167,9 +180,9 @@ class Session:
                     continue
                 require(phase in ("result", "ports-probe", "certificate-ready", "cutover-ready", "verify-existing"), "INVALID_REMOTE_PROTOCOL")
                 if phase == "result":
-                    require(set(event) <= {"event", "status", "operation", "changes", "arch", "certificate", "port", "code", "phase", "error_kind"}, "INVALID_REMOTE_PROTOCOL")
+                    require(set(event) <= {"event", "status", "operation", "changes", "arch", "certificate", "port", "code", "phase", "error_kind", "firewall_plan", "firewall_added"}, "INVALID_REMOTE_PROTOCOL")
                     status = event.get("status")
-                    require(status in ("FAILED", "SUCCESS", "CHECK_CANDIDATE_ACTIVE_PROOF_REQUIRED", "CHECK_EXISTING_HTTPS", "CHECK_MANAGED_TLS_STOPPED"), "INVALID_REMOTE_PROTOCOL")
+                    require(status in ("FAILED", "SUCCESS", "CHECK_CANDIDATE_ACTIVE_PROOF_REQUIRED", "CHECK_EXISTING_HTTPS", "CHECK_MANAGED_TLS_STOPPED", "CHECK_FIREWALL_PLAN_REQUIRED"), "INVALID_REMOTE_PROTOCOL")
                     if status == "FAILED":
                         require(event.get("phase") is None or type(event["phase"]) is str and event["phase"] in REMOTE_PHASES, "INVALID_REMOTE_PROTOCOL")
                         require(event.get("error_kind") is None or type(event["error_kind"]) is str and event["error_kind"] in ERROR_KINDS, "INVALID_REMOTE_PROTOCOL")
@@ -179,17 +192,22 @@ class Session:
                         if error.phase == "BOOTSTRAP_EXEC" and self.diagnostics and self.diagnostics[-1][0] == "REMOTE":
                             error.phase = self.diagnostics[-1][1]
                         raise error
+                    for key in ("firewall_plan", "firewall_added"):
+                        ports = event.get(key, [])
+                        require(type(ports) is list and all(type(p) is int and p in (80, 443) for p in ports) and ports == sorted(set(ports)), "INVALID_REMOTE_PROTOCOL")
+                    require(not event.get("firewall_added") or status == "SUCCESS" and options["mode"] == "apply", "INVALID_REMOTE_PROTOCOL")
                     if status == "SUCCESS":
+                        require(event.get("firewall_added", []) == firewall_added, "INVALID_REMOTE_PROTOCOL")
                         required = cutover if event.get("operation") == "https-enabled" else ["verify-existing"]
                         require(options["mode"] == "apply" and history == required, "EXTERNAL_PROOF_SEQUENCE_REQUIRED")
                     else:
                         require(options["mode"] == "check" and not history, "INVALID_REMOTE_PROTOCOL")
                     if status == "CHECK_EXISTING_HTTPS": verify("verify-existing", event)
-                    require(event.get("operation") in (None, "already-https", "https-enabled", "https-service-recovered") and event.get("changes") in ("none", "studio-tls-only") and event.get("arch") in (None, "x64", "arm64"), "INVALID_REMOTE_PROTOCOL")
+                    require(event.get("operation") in (None, "already-https", "https-enabled", "https-service-recovered") and event.get("changes") in ("none", "studio-tls-only", "studio-tls-and-ufw") and event.get("arch") in (None, "x64", "arm64"), "INVALID_REMOTE_PROTOCOL")
                     require(status == "SUCCESS" or event.get("arch") in ("x64", "arm64"), "INVALID_REMOTE_PROTOCOL")
                     require(status != "SUCCESS" or event.get("operation") in ("already-https", "https-enabled", "https-service-recovered"), "INVALID_REMOTE_PROTOCOL")
                     # No arbitrary remote strings are printed or returned.
-                    return {"status": status, "arch": event.get("arch"), "operation": event.get("operation"), "changes": event.get("changes", "none")}
+                    return {"status": status, "arch": event.get("arch"), "operation": event.get("operation"), "changes": event.get("changes", "none"), "firewall_plan": event.get("firewall_plan", []), "firewall_added": event.get("firewall_added", [])}
                 expected = {"event"} if phase == "ports-probe" else {"event", "fingerprint", "port"}
                 require(set(event) == expected, "INVALID_REMOTE_PROTOCOL")
                 require(options["mode"] == "apply" and (
@@ -245,7 +263,7 @@ def verified_main():
 
 
 def main():
-    diagnostics = []; phases = []; interfaces = []; runner_phase = "RUNNER_INPUT"
+    diagnostics = []; phases = []; interfaces = []; firewalls = []; runner_phase = "RUNNER_INPUT"
     def mark(phase):
         nonlocal runner_phase
         require(phase in RUNNER_PHASES, "INVALID_CHECK_PHASE")
@@ -267,20 +285,20 @@ def main():
             mark("RUNNER_EXTERNAL_PROOF")
             verify(phase, event)
         mark("RUNNER_SSH_CHECK")
-        checked = Session(ssh, diagnostics=phases, interface_diagnostics=interfaces).run({**options, "mode": "check"}, verify=external_verify)
+        checked = Session(ssh, diagnostics=phases, interface_diagnostics=interfaces, firewall_diagnostics=firewalls).run({**options, "mode": "check"}, verify=external_verify)
         if normalized["mode"] == "check": result = checked
         else:
             with tempfile.TemporaryDirectory(prefix="studio-caddy-") as tmp:
                 mark("RUNNER_ARTIFACT")
                 archive = download(checked["arch"], Path(tmp) / "caddy.tar.gz")
                 mark("RUNNER_SSH_APPLY")
-                result = Session(ssh, diagnostics=phases, interface_diagnostics=interfaces).run(options, archive.read_bytes(), external_verify)
+                result = Session(ssh, diagnostics=phases, interface_diagnostics=interfaces, firewall_diagnostics=firewalls).run(options, archive.read_bytes(), external_verify)
         mark("RUNNER_RESULT")
         message = json.dumps(result, sort_keys=True)
         print(message)
         if os.environ.get("GITHUB_STEP_SUMMARY"):
             with open(os.environ["GITHUB_STEP_SUMMARY"], "a") as output:
-                output.write("## Studio managed HTTPS\n\n```json\n" + message + "\n```\n\nNo production booking POST was sent. Browser/SQLite acceptance is required in CI; this run verifies live TLS, health, read-only API and backend closure.\n")
+                output.write("## Studio managed HTTPS\n\n```json\n" + message + "\n```\n\nNo production booking POST was sent. Browser/SQLite acceptance is required in CI; this run verifies live TLS, health, read-only API and backend closure. check never writes firewall; firewall_plan lists missing TCP ports. apply may append only audited missing TCP/80/443 allows. Unknown/partial firewall state requires manual review, never automatic rollback.\n")
         return 0
     except BaseException as error:
         code = safe_code(str(error)) if isinstance(error, (HttpsError, ValueError)) else "HTTPS_WORKFLOW_FAILED"
@@ -294,6 +312,9 @@ def main():
         return 1
 
     finally:
+        if firewalls and os.environ.get("GITHUB_STEP_SUMMARY"):
+            with open(os.environ["GITHUB_STEP_SUMMARY"], "a") as output:
+                output.write("\nVerified missing UFW TCP allows added: " + ", ".join(str(p) for p in sorted({p for row in firewalls for p in row})) + ". These allows remain if a later TLS phase fails; no firewall rollback/delete was attempted. Re-run check before further action.\n")
         if interfaces and os.environ.get("GITHUB_STEP_SUMMARY"):
             with open(os.environ["GITHUB_STEP_SUMMARY"], "a") as output: output.write(interface_report(interfaces))
         if phases and os.environ.get("GITHUB_STEP_SUMMARY"):

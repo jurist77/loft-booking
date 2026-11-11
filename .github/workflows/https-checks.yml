@@ -39,6 +39,25 @@ jobs:
       - name: Isolated settings, preflight, DNS, transport, rollback and privacy fixtures
         run: PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s tests/https -v
 
+  ufw_kernel:
+    if: github.event_name != 'workflow_dispatch'
+    strategy:
+      fail-fast: false
+      matrix:
+        runner: [ubuntu-24.04, ubuntu-24.04-arm]
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - name: UFW tooling on disposable runner only; never enable host firewall
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends ufw iptables nftables iproute2
+      - name: Require real standard Ubuntu UFW in private network and mount namespaces
+        run: sudo env STUDIO_UFW_KERNEL_CI=1 GITHUB_ACTIONS=true PYTHONDONTWRITEBYTECODE=1 python3 tests/https/ufw_kernel.py
+
   public_dns_check:
     if: github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-24.04
