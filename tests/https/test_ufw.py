@@ -160,9 +160,18 @@ class FirewallTests(unittest.TestCase):
         fw.F.stock_nft_profile(data,profiles=(reference,))
         data['ip4']=data['ip4'].replace('--comment dapp_OpenSSH', '--comment "\'dapp_OpenSSH\'"')
         fw.F.stock_nft_profile(data,profiles=(reference,))
-        self.assertEqual(fw.F.canonical_rule(['--comment', "'dapp_OpenSSH'"]),['--comment','dapp_OpenSSH'])
+        self.assertEqual(fw.F.canonical_rule(['--comment', "'dapp_OpenSSH'"],annotations=True),[])
         data['ip4']=data['ip4'].replace('-j ACCEPT -m comment','-j ACCEPT -m conntrack -m comment')
         with self.assertRaises(fw.F.Unsafe):fw.F.stock_nft_profile(data,profiles=(reference,))
+
+    def test_comment_labels_never_prove_ownership_or_change_the_exact_tcp_accept_selector(self):
+        data=Fixture().take();nf=json.loads(data['nft'])
+        data['ip4']=data['ip4'].replace('--dport 22 -j ACCEPT','--dport 22 -m comment --comment arbitrary-label -j ACCEPT')
+        rule=next(r['rule'] for r in nf['nftables'] if 'rule'in r and r['rule']['family']=='ip' and r['rule']['chain']=='ufw-user-input')
+        rule['expr'].insert(0,{'xt':{'type':'match','name':'comment'}});data['nft']=json.dumps(nf)
+        ref=fw.F.stock_shape(data);fw.F.stock_nft_profile(data,profiles=(ref,))
+        rule['expr'].insert(0,{'xt':{'type':'match','name':'owner'}});data['nft']=json.dumps(nf)
+        with self.assertRaises(fw.F.Unsafe):fw.F.stock_nft_profile(data,profiles=(ref,))
 
     def test_bundled_module_and_all_safe_codes_are_in_protocol(self):
         source=h.workflow.source()

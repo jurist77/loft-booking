@@ -317,8 +317,11 @@ def stock_nft_profile(data, profiles=STANDARD_UFW_PROFILES):
                 allowed_modules=[proto]+(['comment'] if comment else [])
                 if len(modules)!=len(set(modules)) or any(m not in allowed_modules for m in modules) or ('comment' in modules)!=comment:
                     raise Unsafe('STANDARD_UFW_USER_IP_RULE_UNCONFIRMED')
-                if comment and (fields['--comment'] not in ('dapp_OpenSSH',"'dapp_OpenSSH'") or proto!='tcp' or port!=22):raise Unsafe('STANDARD_UFW_USER_PROFILE_UNCONFIRMED')
-                if native.get('comment') not in ((None,'dapp_OpenSSH',"'dapp_OpenSSH'") if comment else (None,)):raise Unsafe('STANDARD_UFW_USER_COMMENT_UNCONFIRMED')
+                # Linux xt_comment.comment_mt() always returns true. Labels
+                # prove no identity/ownership and cannot change this simple
+                # ACCEPT selector. Keep their exact bytes in both post-deltas.
+                if comment and len(fields['--comment'].encode())>256:raise Unsafe('STANDARD_UFW_USER_COMMENT_UNCONFIRMED')
+                if native.get('comment') is not None and (type(native['comment']) is not str or len(native['comment'].encode())>256):raise Unsafe('STANDARD_UFW_USER_COMMENT_UNCONFIRMED')
                 expr=[clean_nft(v) for v in native['expr'] if set(v)!={'counter'}]
                 match={'match':{'op':'==','left':{'payload':{'protocol':proto,'field':'dport'}},'right':port}}
                 annotation={'xt':{'type':'match','name':'comment'}}

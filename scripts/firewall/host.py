@@ -163,14 +163,16 @@ def persistent_rules(raw):
     return [line for line in raw.splitlines() if line.startswith(("### tuple ###", "-A ", ":", "*")) or line == "COMMIT"]
 
 
-def canonical_rule(args):
+def canonical_rule(args, annotations=False):
     result = []; i = 0
     while i < len(args):
         if args[i:i + 2] in (["-m", "tcp"], ["-m", "udp"]): i += 2; continue
-        # Audited UFW uses split(), not shlex, when sending the app marker to
-        # iptables. Literal quotes are annotation data, not packet predicates.
-        value = "dapp_OpenSSH" if i and args[i-1] == "--comment" and args[i] == "'dapp_OpenSSH'" else args[i]
-        result.append(value.replace("/minute", "/min")); i += 1
+        # xt_comment is always-true annotation, not a packet predicate. Its
+        # bytes/order remain protected by the exact postflight deltas; only
+        # stock-profile semantic live/file comparison omits this metadata.
+        if annotations and args[i:i+2] == ["-m", "comment"]: i += 2; continue
+        if annotations and args[i] == "--comment": i += 2; continue
+        result.append(args[i].replace("/minute", "/min")); i += 1
     return result
 
 
@@ -247,8 +249,8 @@ def firewall_plan(data, port=3000, allow_existing=False):
         user_prefix = ("ufw" if version == 4 else "ufw6") + "-user-"
         if not any(chain.startswith(user_prefix) for chain in saved["chains"]): raise Unsafe("PERSISTED_RULES_DIFFER")
         for chain in saved["chains"]:
-            live = [canonical_rule(r) for r in active["rules"] if r[1] == chain]
-            stored = [canonical_rule(r) for r in saved["rules"] if r[1] == chain]
+            live = [canonical_rule(r, annotations=stock) for r in active["rules"] if r[1] == chain]
+            stored = [canonical_rule(r, annotations=stock) for r in saved["rules"] if r[1] == chain]
             if live != stored or saved["chains"].get(chain) != "-": raise Unsafe("PERSISTED_RULES_DIFFER")
         # Restrict persisted tuples too: a broad/app/range rule can cause UFW's
         # matcher to replace a rule instead of appending. Never infer it safe.
