@@ -148,7 +148,16 @@ class ResidueTests(unittest.TestCase):
         group=self.audit.groups()[0];group.gr_mem.append(CANARY)
         self.assertBlocked('IDENTITY_MISMATCH');group.gr_mem.clear()
         self.audit.account=lambda _:(_ for _ in ()).throw(KeyError())
-        self.assertBlocked('IDENTITY_MISMATCH')
+        value=self.assertBlocked('IDENTITY_MISMATCH')
+        self.assertEqual(value['identity_detail'],'USER_MISSING')
+
+    def test_identity_subreasons_preserve_the_same_historical_rejection(self):
+        account=self.audit.account('ignored')
+        for field,value,code in (('pw_uid',0,'SYSTEM_UID_MISMATCH'),('pw_gid',0,'SYSTEM_GID_MISMATCH'),
+                ('pw_shell','/bin/bash','SHELL_MISMATCH'),('pw_dir','/home/other','HOME_MISMATCH')):
+            previous=getattr(account,field);setattr(account,field,value)
+            self.assertEqual(self.assertBlocked('IDENTITY_MISMATCH')['identity_detail'],code)
+            setattr(account,field,previous)
 
     def test_external_symlink_and_unit_reference_block_without_output(self):
         link=self.root/'foreign-link';link.symlink_to(probe.TLS_ROOTS[0]+'/control.py')
