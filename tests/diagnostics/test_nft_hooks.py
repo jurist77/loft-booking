@@ -4,7 +4,7 @@ import json
 from pathlib import Path
 import sys
 import unittest
-from unittest.mock import Mock
+from unittest.mock import Mock, patch
 
 ROOT=Path(__file__).resolve().parents[2]
 sys.path.insert(0,str(ROOT/'scripts/diagnostics'))
@@ -174,6 +174,26 @@ class HookTests(unittest.TestCase):
         for value in (None,[],{}, {'state':CANARY}):self.assertFalse(probe.valid_nft_audit(value))
         data=summary(chain());data['hooks'][0]['priority']=True
         self.assertFalse(probe.valid_nft_audit(data))
+
+    def test_full_hook_inventory_fits_explicit_readonly_limit_and_installer_default_stays(self):
+        entries=[]
+        for i in range(32):
+            entries.extend((chain(name='c'+str(i)),rule({'xt':{}},{'drop':None},{'mangle':{}},name='c'+str(i))))
+        data=fixture();data['nft_hooks']=probe.nft_hooks_summary(json.dumps({'nftables':entries}),'','')
+        raw=json.dumps(runner.validate(data)).encode()
+        self.assertGreater(len(raw),10000);self.assertLess(len(raw),65536)
+        import deploy
+        child=Mock();child.communicate.return_value=(raw,b'');child.returncode=0;child.poll.return_value=0
+        with patch.object(deploy.subprocess,'Popen',return_value=child):
+            client=deploy.SSH('192.0.2.10',CANARY)
+            with self.assertRaisesRegex(deploy.DeployError,'REMOTE_PROTOCOL_FAILED'):client.execute('fixture')
+            self.assertEqual(client.execute('fixture',output_limit=65536),data)
+            child.communicate.return_value=(b'x'*65537,b'')
+            with self.assertRaisesRegex(deploy.DeployError,'REMOTE_PROTOCOL_FAILED'):client.execute('fixture',output_limit=65536)
+        for limit in (None,True,0,65537):
+            with patch.object(deploy.subprocess,'Popen') as call:
+                with self.assertRaises(deploy.DeployError):client.execute('fixture',output_limit=limit)
+                call.assert_not_called()
 
     def test_legacy_identity_reason_does_not_assert_residue_on_clean_vps(self):
         remote=fixture();remote['tls_residue'].update(account='missing',reason='IDENTITY_MISMATCH',identity_detail='USER_MISSING')

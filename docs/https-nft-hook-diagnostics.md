@@ -20,7 +20,7 @@
 - Возможные effects для TCP/22/80/443: selectors, jumps/gotos, default drop, неизвестные выражения. Для ingress/prerouting/input рассматривается destination port; для output/postrouting/egress — source port ответа локального сервера. Forward и чужие families не объявляются безопасными.
 - `VPN_NAME_HINT_ONLY`, наблюдение активного известного VPN unit, `creator: NOT_PROVEN`. Подсказки не дают права менять правила.
 
-Адреса, интерфейсы, названия tables/chains, marks, NAT destinations, комментарии, PID, VPN-конфигурации, токены и raw stderr остаются вне отчёта. Runner проверяет точную схему и ограниченный словарь.
+Адреса, интерфейсы, названия tables/chains, marks, NAT destinations, комментарии, PID, VPN-конфигурации, токены и raw stderr остаются вне отчёта. Runner проверяет точную схему и ограниченный словарь. Для ограниченной сводки максимум 32 hooks используется явный SSH JSON limit 64 KiB: полный отчёт может превышать прежние 10 KB. Общий SSH helper сохраняет прежний default 10 KB для installer/update/restore и отказывает при превышении любого выбранного лимита. SSH policy/команды/аутентификация не изменены; файлов и публичных raw-артефактов отчёта не создаётся.
 
 `DROP_POSSIBLE`/`REJECT_POSSIBLE` — возможная фильтрация; `NAT_POSSIBLE`/`TPROXY_POSSIBLE` — изменение направления; `MARK_OR_TRACKING_POSSIBLE` — потенциальное влияние через routing/conntrack. `UNKNOWN_REVIEW_REQUIRED` требует разбора. `ACCEPT_OBSERVED` не означает доступность: поздний hook может отбросить пакет.
 

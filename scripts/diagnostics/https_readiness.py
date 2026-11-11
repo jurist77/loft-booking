@@ -140,7 +140,7 @@ def diagnose(address, password, ssh_factory=SSH, external=external_checks):
         ssh = ssh_factory(address, password)
         with tempfile.TemporaryFile(mode="w+b") as source:
             source.write(payload()); source.seek(0)
-            remote = validate(ssh.execute(REMOTE_COMMAND, source, timeout=150))
+            remote = validate(ssh.execute(REMOTE_COMMAND, source, timeout=150, output_limit=65536))
             health_valid(remote["studio"]["local_health"])
             if (remote["studio"]["listener_owned"] and not remote["studio"]["snapshot_stable"] or
                     remote["studio"]["bind_proof"] != "unconfirmed" and not remote["studio"]["listener_owned"]): raise ProtocolError()
