@@ -20,6 +20,7 @@ import time
 ROOT = Path(__file__).resolve().parents[2]
 sys.path[:0] = [str(ROOT/'scripts/https'),str(ROOT/'scripts/firewall'),str(ROOT/'scripts/diagnostics'),str(ROOT/'scripts/installer')]
 import firewall as fw
+from rules import nft_rule
 
 
 def run(args, timeout=30):
@@ -112,7 +113,7 @@ def inside():
                     print(f'CI_UFW_NFT_PORT{port}_PROOF_REJECTED',flush=True)
                     # Grammar/enum codes only from this synthetic namespace.
                     # No rule strings, addresses, names or configurations.
-                    known={'match','counter','log','limit','accept','drop','reject','return','jump','xt','payload','meta','ct','exthdr','rt','type','name','field','protocol','key','dir','flags','offset','l4proto','iifname','state','tcp','udp','icmp','icmpv6','ipv6-icmp','related','established','invalid','new','present','original','reply','==','!=','in','dport','sport','length','fragment','version','nfproto'}
+                    known={'match','counter','log','limit','accept','drop','reject','return','jump','xt','payload','meta','ct','exthdr','rt','type','name','field','protocol','key','dir','flags','offset','l4proto','iifname','state','tcp','udp','icmp','icmpv6','ipv6-icmp','related','established','invalid','new','present','original','reply','==','!=','in','dport','sport','length','fragment','version','nfproto','fib','result','daddr','saddr','local','multicast','broadcast','unicast'}
                     def grammar(value):
                         if isinstance(value,dict):
                             parts=[]
@@ -126,11 +127,11 @@ def inside():
                     for item in json.loads(before['nft'])['nftables']:
                         if 'rule' not in item:continue
                         rule=item['rule']
-                        try:condition,verdict=fw.F.nft_rule(rule['expr'],port,rule['chain'])
+                        try:condition,verdict=nft_rule(rule['expr'],port,rule['chain'])
                         except fw.F.Unsafe:print('CI_NFT_UNSUPPORTED_GRAMMAR_'+grammar(rule['expr']),flush=True)
                         else:
-                            if condition is None and verdict in ('DROP','REJECT'):
-                                print('CI_NFT_UNPROVEN_DROP_GRAMMAR_'+grammar(rule['expr']),flush=True)
+                            if condition is None:
+                                print('CI_NFT_UNPROVEN_BRANCH_GRAMMAR_'+grammar(rule['expr']),flush=True)
                     raise
             assert fw.inspect(['192.0.2.1'])['firewall_plan']==[80,443]
             assert fw.fingerprint(fw.take())==fingerprint,'CI_CHECK_MUTATED_FIREWALL'
