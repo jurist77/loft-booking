@@ -95,13 +95,16 @@ function notifyOwner(db: Database.Database, dedupe: string, payload: ControlPayl
 }
 function subscribe(db: Database.Database, r: Person, now: number, key: string) {
   if (r.active && r.connection_status === "connected") { controlMessage(db, r.id, `already:${r.id}:${r.subscription_version}`, { text: "Подписка уже активна." }, now); return; }
+  if (ownerIs(db, r.id)) {
+    // A request may predate bootstrap/role transfer. Owner authority removes
+    // the approval requirement, but subscription still needs this explicit click.
+    db.prepare("UPDATE telegram_recipients SET active=1,subscription_version=subscription_version+1,updated_at=? WHERE id=?").run(now, r.id);
+    db.prepare("UPDATE telegram_subscription_requests SET status='approved',updated_at=? WHERE recipient_id=? AND status='pending'").run(now, r.id);
+    controlMessage(db, r.id, key, { text: "Ваша подписка включена. Права владельца от неё не зависят." }, now); return;
+  }
   const pending = db.prepare("SELECT id FROM telegram_subscription_requests WHERE recipient_id=? AND status='pending'").get(r.id);
   if (pending) return; // No duplicate request or owner notification.
   db.prepare("UPDATE telegram_recipients SET connection_status='connected',subscription_version=subscription_version+1,updated_at=? WHERE id=?").run(now, r.id);
-  if (ownerIs(db, r.id)) {
-    db.prepare("UPDATE telegram_recipients SET active=1 WHERE id=?").run(r.id);
-    controlMessage(db, r.id, key, { text: "Ваша подписка включена. Права владельца от неё не зависят." }, now); return;
-  }
   const id = randomUUID();
   db.prepare("INSERT INTO telegram_subscription_requests(id,recipient_id,status,created_at,updated_at,expires_at) VALUES (?,?,'pending',?,?,?)").run(id, r.id, now, now, now + 7 * DAY);
   controlMessage(db, r.id, key, { text: "Заявка отправлена владельцу. До одобрения уведомления о бронированиях недоступны." }, now);

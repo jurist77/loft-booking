@@ -298,3 +298,14 @@ it("self-unsubscribe bypasses an exhausted interaction quota and still cancels b
   await drain(); expect(messages.filter(m => m.chat === "111" && m.text.includes("Сотрудник отключил рассылку"))).toHaveLength(1);
   expect(ownerIs(db, recipient(111).id)).toBe(true);
 });
+it("a pending employee request cannot require approval after that account becomes the owner", async () => {
+  received(111, SUBSCRIBE); await bootstrap();
+  received(111, SUBSCRIBE); await drain();
+  expect(recipient(111).active).toBe(1);
+  expect(db.prepare("SELECT status FROM telegram_subscription_requests WHERE recipient_id=?").get(recipient(111).id)).toEqual({ status: "approved" });
+  received(222, SUBSCRIBE); await drain(); expect(recipient(222).active).toBe(0);
+  await menu(111, "Передача прав"); await tap(111, button(111, "Выбрать")); await tap(111, button(111, "Подтверждаю передачу"));
+  await tap(222, button(222, "Принять права")); expect(recipient(222).active).toBe(0);
+  received(222, SUBSCRIBE); await drain(); expect(recipient(222).active).toBe(1);
+  expect(db.prepare("SELECT status FROM telegram_subscription_requests WHERE recipient_id=?").get(recipient(222).id)).toEqual({ status: "approved" });
+});
