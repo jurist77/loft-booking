@@ -20,7 +20,7 @@
 | Проверка | Результат |
 | --- | --- |
 | `npm test` | 165 passed |
-| `npm run test:integration` | 96 passed, реальная SQLite; 19 новых Telegram сценариев |
+| `npm run test:integration` | 97 passed, реальная SQLite; 20 новых Telegram сценариев |
 | Installer/security Python | 89 passed, включая 14 сценариев Actions/SSH и GPG backup/restore v1/v2 |
 | HTTPS Python | 88 passed |
 | VPS audit Python | 11 passed |
@@ -39,7 +39,7 @@
 ## Что покрывают новые тесты
 
 - Невозможность first-Start/self-admin, чужого/просроченного/повторного bootstrap; group/bot/spoof отбрасываются; в SQLite только хеши.
-- Одна pending-заявка/одно уведомление, одобрение/отказ, no historic booking backfill, подтверждённые подписчики, disable/cancel/rejoin.
+- Одна pending-заявка/одно уведомление, одобрение/отказ, no historic booking backfill, подтверждённые подписчики, disable/cancel/rejoin, отключение собственной подписки даже после исчерпания квоты на нажатия (регрессия сначала воспроизведена падающим тестом).
 - Owner unsubscribe не удаляет роль; pause/status/test работают независимо. Две стороны передачи роли, старые кнопки/ожидающие owner-ответы аннулируются; удалённый кандидат не принимает старое предложение.
 - Временные ошибки/429/24ч/backup/restart, бронь остаётся confirmed при ошибке Telegram, отсутствие дублей booking jobs.
 - Откат request/outbox/update offset при искусственной ошибке SQLite; настоящий long-poll session проводит update через меню и контролирует конфигурацию.

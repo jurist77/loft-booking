@@ -8,7 +8,7 @@ Tokens are verified with getMe and webhook checks before an atomic private confi
 
 ### Validation
 
-Local: 165 unit, 96 real SQLite integration, 89 installer/security, 88 HTTPS, 11 VPS-audit, 45 firewall fixtures; six kernel-only firewall cases require the existing isolated Ubuntu CI. SERVER build, API HTTP19, repeated health recovery and permanent-failure control, TypeScript, lint, Node/static DEMO isolation/audit, SERVER browser40 and static DEMO browser26 passed. Telegram transport is substituted; no actual bot/VPS messages or production data.
+Local: 165 unit, 97 real SQLite integration, 89 installer/security, 88 HTTPS, 11 VPS-audit, 45 firewall fixtures; six kernel-only firewall cases require the existing isolated Ubuntu CI. SERVER build, API HTTP19, repeated health recovery and permanent-failure control, TypeScript, lint, Node/static DEMO isolation/audit, SERVER browser40 and static DEMO browser26 passed. Telegram transport is substituted; no actual bot/VPS messages or production data.
 
 Required CI retains Backend, native Installer x64/ARM64 (including browser/Caddy/systemd/update/restore/rollback), HTTPS/kernel x64/ARM64 and VPS Audit. Final results must be verified on this PR's final SHA in Checks.
 

@@ -201,6 +201,12 @@ export function handleInteraction(db: Database.Database, update: TelegramUpdate,
   const text = typeof update.message?.text === "string" ? update.message.text : "";
   if (!callback && ![SUBSCRIBE, UNSUBSCRIBE, MANAGE, "/owner"].includes(text) && !/^\/start(?: [A-Za-z0-9_-]{1,64})?$/.test(text)) return;
   const found = db.prepare("SELECT * FROM telegram_recipients WHERE telegram_user_id=?").get(String(user.id)) as Person | undefined;
+  // Opt-out must remain available even after a user exhausts the interaction
+  // quota. Verified private identity above still applies; unchanged opt-outs
+  // are deduplicated and cannot flood the owner or create new recipients.
+  if (found && !callback && text === UNSUBSCRIBE) {
+    expireInteractions(db, now); unsubscribe(db, found, now, `update:${update.update_id}`); return;
+  }
   const owner = !!found && ownerIs(db, found.id);
   if (!allowed(db, `user:${digestToken(String(user.id))}`, now, MINUTE, owner ? 40 : 8) || (!owner && !allowed(db, "public", now, MINUTE, 20))) return;
   const r = found ?? ensurePerson(db, user, now);

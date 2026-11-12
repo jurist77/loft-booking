@@ -288,3 +288,13 @@ it("the existing long-poll session routes Telegram updates to subscription UI an
   expect(telegramState(db)).toMatchObject({ worker_config: fingerprint, update_offset: event.update_id + 1, worker_until: 0, worker_owner: null });
   expect(recipient(222).active).toBe(0);
 });
+it("self-unsubscribe bypasses an exhausted interaction quota and still cancels booking jobs immediately", async () => {
+  await bootstrap(); received(222, SUBSCRIBE); await drain(); await tap(111, button(111, "Одобрить")); booking();
+  for (let n = 0; n < 10; n++) received(222, "/start");
+  received(222, UNSUBSCRIBE);
+  expect(recipient(222).active).toBe(0);
+  expect(db.prepare("SELECT status FROM telegram_outbox WHERE recipient_id=?").get(recipient(222).id)).toEqual({ status: "cancelled" });
+  for (let n = 0; n < 20; n++) received(222, UNSUBSCRIBE);
+  await drain(); expect(messages.filter(m => m.chat === "111" && m.text.includes("Сотрудник отключил рассылку"))).toHaveLength(1);
+  expect(ownerIs(db, recipient(111).id)).toBe(true);
+});
