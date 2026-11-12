@@ -21,7 +21,7 @@
 | --- | --- |
 | `npm test` | 165 passed |
 | `npm run test:integration` | 96 passed, реальная SQLite; 19 новых Telegram сценариев |
-| Installer/security Python | 88 passed, включая 13 сценариев Actions/SSH и GPG backup/restore v1/v2 |
+| Installer/security Python | 89 passed, включая 14 сценариев Actions/SSH и GPG backup/restore v1/v2 |
 | HTTPS Python | 88 passed |
 | VPS audit Python | 11 passed |
 | Firewall Python | 45 passed, 6 kernel-сценариев не выполнены локально; реальные изолированные kernel-проверки обязательны в HTTPS CI |

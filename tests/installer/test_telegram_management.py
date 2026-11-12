@@ -8,6 +8,7 @@ from pathlib import Path
 import subprocess
 import sys
 import tempfile
+import tarfile
 from types import SimpleNamespace
 import unittest
 from unittest.mock import Mock,patch
@@ -140,6 +141,26 @@ class ManagementTests(unittest.TestCase):
             child=Mock();child.communicate.return_value=(b'',None);child.returncode=code;child.poll.return_value=code
             with patch.object(w.subprocess,'Popen',return_value=child):
                 with self.assertRaisesRegex(w.Failure,expected):w.Peer('192.0.2.10','fake').call({'operation':'diagnose'})
+    def test_native_fault_fixture_appends_migration_after_0004_without_replacing_applied_history(self):
+        spec=importlib.util.spec_from_file_location('telegram_native_fault_fixture',ROOT/'tests/installer/real_systemd.py')
+        native=importlib.util.module_from_spec(spec);spec.loader.exec_module(native)
+        with tempfile.TemporaryDirectory() as folder:
+            folder=Path(folder);source=folder/'source';migrations=source/'root/app/migrations/sqlite';migrations.mkdir(parents=True)
+            build=source/'root/app/.next-server';build.mkdir();(build/'BUILD_ID').write_text('fixture')
+            original={}
+            for version in range(1,5):
+                name=f'{version:04d}_fixture.sql';(migrations/name).write_text('SELECT 1;');original[name]='a'*64
+            (source/'manifest.json').write_text(json.dumps({'migrations':original,'version':'a'*40}))
+            archive=folder/'original.tar.gz'
+            with tarfile.open(archive,'w:gz') as out:
+                out.add(source/'manifest.json',arcname='manifest.json');out.add(source/'root',arcname='root')
+            for fault in ('bad-migration','changed-schema-bad-start'):
+                changed=native.variant(archive,folder,'b'*40,fault)
+                with tarfile.open(changed) as bundle:
+                    metadata=json.loads(bundle.extractfile('manifest.json').read())
+                    self.assertEqual({k:v for k,v in metadata['migrations'].items() if k in original},original)
+                    self.assertEqual(set(metadata['migrations'])-set(original),{'0005_ci_test.sql'})
+                    self.assertEqual(bundle.extractfile('root/app/migrations/sqlite/0004_fixture.sql').read(),b'SELECT 1;')
     def test_workflow_manual_main_and_global_registry_serialization_without_new_daemon(self):
         text=(ROOT/'.github/workflows/manage-studio-telegram.yml').read_text()
         for term in ('workflow_dispatch:',"github.ref == 'refs/heads/main'",'deployments: write','group: studio-telegram-management','cancel-in-progress: false','secrets.STUDIO_TELEGRAM_BOT_TOKEN','secrets.STUDIO_TELEGRAM_OWNER_CONFIRMATION'):self.assertIn(term,text)

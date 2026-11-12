@@ -144,7 +144,8 @@ def variant(original, directory, version, fault=None):
     if fault in ("bad-start", "changed-schema-bad-start"):
         (root / "root/app/.next-server/BUILD_ID").unlink()
     if fault in ("bad-migration", "changed-schema-bad-start"):
-        migration = root / "root/app/migrations/sqlite/0004_ci_test.sql"
+        next_version = max(int(name.split("_")[0]) for name in manifest["migrations"]) + 1
+        migration = root / f"root/app/migrations/sqlite/{next_version:04d}_ci_test.sql"
         migration.write_text("NOT VALID SQL;" if fault == "bad-migration" else "CREATE TABLE _ci_installer(value INTEGER) STRICT;")
         manifest["migrations"][migration.name] = installer.digest(migration)
     manifest["unpacked_bytes"] = sum(p.stat().st_size for p in (root / "root").rglob("*") if p.is_file())
