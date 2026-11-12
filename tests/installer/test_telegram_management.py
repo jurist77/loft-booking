@@ -163,8 +163,10 @@ class ManagementTests(unittest.TestCase):
                     self.assertEqual(bundle.extractfile('root/app/migrations/sqlite/0004_fixture.sql').read(),b'SELECT 1;')
     def test_workflow_manual_main_and_global_registry_serialization_without_new_daemon(self):
         text=(ROOT/'.github/workflows/manage-studio-telegram.yml').read_text()
-        for term in ('workflow_dispatch:',"github.ref == 'refs/heads/main'",'deployments: write','group: studio-telegram-management','cancel-in-progress: false','secrets.STUDIO_TELEGRAM_BOT_TOKEN','secrets.STUDIO_TELEGRAM_OWNER_CONFIRMATION'):self.assertIn(term,text)
-        for term in ('  push:', '  schedule:', '${{ inputs.', 'STUDIO_SSH_KNOWN_HOSTS','token:\n        description:'):self.assertNotIn(term,text)
+        for term in ('workflow_dispatch:',"github.ref == 'refs/heads/main'",'deployments: write','group: studio-telegram-management','group: studio-install-${{ inputs.server_ip }}','cancel-in-progress: false','secrets.STUDIO_TELEGRAM_BOT_TOKEN','secrets.STUDIO_TELEGRAM_OWNER_CONFIRMATION'):self.assertIn(term,text)
+        for term in ('  push:', '  schedule:', 'STUDIO_SSH_KNOWN_HOSTS','token:\n        description:'):self.assertNotIn(term,text)
+        # Inputs are metadata only, never interpolated into a shell command.
+        self.assertEqual(text.count('${{ inputs.'),1)
         host=(FOLDER/'host.py').read_text()
         for term in ('systemctl restart','systemctl stop','systemctl enable','ufw allow','nft add','iptables -A','mount --bind','apt-get','docker','sqlite3.connect','shell=True'):self.assertNotIn(term,host)
         self.assertIn('systemd-run',host);self.assertIn('--property=RuntimeMaxSec=60',host)

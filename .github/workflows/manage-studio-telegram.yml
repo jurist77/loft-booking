@@ -25,6 +25,9 @@ concurrency:
 jobs:
   manage:
     if: github.ref == 'refs/heads/main'
+    concurrency:
+      group: studio-install-${{ inputs.server_ip }}
+      cancel-in-progress: false
     runs-on: ubuntu-24.04
     timeout-minutes: 8
     steps:
