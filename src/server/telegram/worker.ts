@@ -3,6 +3,8 @@ import { randomUUID } from "node:crypto";
 import type Database from "better-sqlite3";
 import type { StoredBooking } from "../bookings.ts";
 import type { TelegramResult, TelegramTransport } from "./client.ts";
+import { TelegramControlWorker } from "./control-worker.ts";
+import { handleInteraction } from "./interactions.ts";
 import { bookingMessage } from "./format.ts";
 import { acceptUpdates, acquireWorker, ownsWorker, registerBot, telegramState, telegramTransaction, TelegramModelError } from "./model.ts";
 
@@ -80,7 +82,7 @@ function pause(ms: number, signal: AbortSignal) {
   });
 }
 export async function runTelegramSession(db: Database.Database, api: TelegramTransport, parent: AbortSignal,
-  guard = () => {}, clock: Clock = Date.now, owner: string = randomUUID()): Promise<void> {
+  guard = () => {}, clock: Clock = Date.now, owner: string = randomUUID(), interactionKey?: string, configurationFingerprint?: string): Promise<void> {
   if (!acquireWorker(db, owner, clock())) return;
   const controller = new AbortController(); const abort = () => controller.abort();
   parent.addEventListener("abort", abort, { once: true }); if (parent.aborted) abort();
@@ -91,6 +93,12 @@ export async function runTelegramSession(db: Database.Database, api: TelegramTra
     if (!me.ok) throw new TelegramModelError(me.code);
     if (!ownsWorker(db, owner, clock())) throw new TelegramModelError("WORKER_LEASE_LOST");
     registerBot(db, me.value);
+    if (interactionKey) {
+      db.prepare("UPDATE telegram_state SET last_poll_at=0,worker_config=NULL WHERE id=1").run();
+      try { await api.commands?.(); } catch {} // Menu convenience only; failure never skips auth/polling.
+    }
+    let pollingReady = !interactionKey;
+    const controls = interactionKey ? new TelegramControlWorker(db, owner, api, interactionKey, clock, guard, signal) : undefined;
     const worker = new TelegramDeliveryWorker(db, owner, api, clock, guard, signal);
     tasks.push((async () => { while (!signal.aborted) { await pause(10000, signal); if (signal.aborted) break;
       guard(); if (!acquireWorker(db, owner, clock())) throw new TelegramModelError("WORKER_LEASE_LOST"); } })());
@@ -98,14 +106,23 @@ export async function runTelegramSession(db: Database.Database, api: TelegramTra
       guard(); if (!ownsWorker(db, owner, clock())) throw new TelegramModelError("WORKER_LEASE_LOST");
       const result = await api.getUpdates(telegramState(db).update_offset, signal);
       if (signal.aborted) break;
-      if (result.ok) acceptUpdates(db, owner, result.value, clock());
+      if (result.ok) { acceptUpdates(db, owner, result.value, clock(), interactionKey ? (update) => handleInteraction(db, update, clock(), interactionKey) : undefined); if (interactionKey) db.prepare("UPDATE telegram_state SET last_poll_at=?,worker_config=? WHERE id=1").run(clock(), configurationFingerprint ?? null); pollingReady = true; }
       else {
         db.prepare("UPDATE telegram_state SET last_error=?,last_error_at=? WHERE id=1").run(result.code, clock());
         if (result.permanent) throw new TelegramModelError(result.code);
       }
       await pause(result.ok ? 1000 : Math.max(2000, result.retryAfter), signal);
     } })());
-    tasks.push((async () => { while (!signal.aborted) { await worker.dispatch(); await pause(500, signal); } })());
+    tasks.push((async () => {
+      let controlFirst = true;
+      while (!signal.aborted) {
+        if (pollingReady) {
+          const sent = controlFirst ? (await controls?.dispatch() || await worker.dispatch()) : (await worker.dispatch() || await controls?.dispatch());
+          if (sent) controlFirst = !controlFirst;
+        }
+        await pause(500, signal);
+      }
+    })());
     await Promise.all(tasks);
   } finally {
     controller.abort(); await Promise.allSettled(tasks); parent.removeEventListener("abort", abort);

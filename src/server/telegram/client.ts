@@ -22,14 +22,20 @@ const nativeTelegramFetch: typeof fetch = (input, options) => new Promise((resol
   } catch { reject(new Error("TELEGRAM_TRANSPORT_FAILED")); }
 });
 
-export type TelegramCode = "NETWORK_UNCERTAIN" | "RATE_LIMITED" | "AUTH_INVALID" | "RECIPIENT_UNREACHABLE" | "API_REJECTED" | "TEMPORARY_FAILURE";
+export type TelegramCode = "NETWORK_UNCERTAIN" | "RATE_LIMITED" | "AUTH_INVALID" | "RECIPIENT_UNREACHABLE" | "API_REJECTED" | "TEMPORARY_FAILURE" | "CONCURRENT_POLLING";
 export type TelegramResult<T> = { ok: true; value: T } | { ok: false; code: TelegramCode; permanent: boolean; retryAfter: number };
-export type TelegramUpdate = { update_id: number; message?: { text?: string; from?: { id?: number; is_bot?: boolean }; chat?: { id?: number; type?: string } } };
+export type TelegramUser = { id?: number; is_bot?: boolean; first_name?: string; last_name?: string; username?: string };
+export type TelegramUpdate = { update_id: number; message?: { text?: string; from?: TelegramUser; chat?: { id?: number; type?: string } };
+  callback_query?: { id?: string; data?: string; from?: TelegramUser; message?: { chat?: { id?: number; type?: string } } } };
+export type TelegramMarkup = { inline_keyboard: { text: string; callback_data: string }[][] } | { keyboard: { text: string }[][]; resize_keyboard: boolean };
 export interface TelegramTransport {
   getMe(signal?: AbortSignal): Promise<TelegramResult<{ id: number; username: string }>>;
   getUpdates(offset: number, signal?: AbortSignal): Promise<TelegramResult<TelegramUpdate[]>>;
   // MUST initiate the HTTP attempt synchronously, without an await before fetch.
-  send(chatId: string, text: string, timeout: number, signal?: AbortSignal): Promise<TelegramResult<number>>;
+  send(chatId: string, text: string, timeout: number, signal?: AbortSignal, markup?: TelegramMarkup): Promise<TelegramResult<number>>;
+  webhookInfo?(): Promise<TelegramResult<{ url: string }>>;
+  commands?(): Promise<TelegramResult<boolean>>;
+  answerCallback?(id: string, signal?: AbortSignal): Promise<TelegramResult<boolean>>;
 }
 const uncertain = (): TelegramResult<never> => ({ ok: false, code: "NETWORK_UNCERTAIN", permanent: false, retryAfter: 0 });
 export class TelegramClient implements TelegramTransport {
@@ -64,15 +70,19 @@ export class TelegramClient implements TelegramTransport {
           retryAfter: typeof seconds === "number" && Number.isSafeInteger(seconds) && seconds > 0 ? Math.min(seconds, 86400) * 1000 : 30000 };
         if (code === 401) return { ok: false, code: "AUTH_INVALID", permanent: true, retryAfter: 0 };
         if (code === 403) return { ok: false, code: "RECIPIENT_UNREACHABLE", permanent: true, retryAfter: 0 };
-        if (code >= 500 || code === 409) return { ok: false, code: "TEMPORARY_FAILURE", permanent: false, retryAfter: 0 };
+        if (code === 409) return { ok: false, code: "CONCURRENT_POLLING", permanent: true, retryAfter: 0 };
+        if (code >= 500) return { ok: false, code: "TEMPORARY_FAILURE", permanent: false, retryAfter: 0 };
         return { ok: false, code: "API_REJECTED", permanent: true, retryAfter: 0 };
       } catch { return uncertain(); }
     }).catch(() => uncertain()); // Never expose fetch URLs/token, response descriptions or echoed message/contacts.
   }
   getMe(signal?: AbortSignal) { return this.request<{ id: number; username: string }>("getMe", {}, 8000, signal); }
-  getUpdates(offset: number, signal?: AbortSignal) { return this.request<TelegramUpdate[]>("getUpdates", { offset, timeout: 20, limit: 50, allowed_updates: ["message"] }, 25000, signal); }
-  send(chatId: string, text: string, timeout: number, signal?: AbortSignal) {
-    return this.request<{ message_id: number }>("sendMessage", { chat_id: chatId, text, link_preview_options: { is_disabled: true } }, timeout, signal)
+  getUpdates(offset: number, signal?: AbortSignal) { return this.request<TelegramUpdate[]>("getUpdates", { offset, timeout: 20, limit: 50, allowed_updates: ["message", "callback_query"] }, 25000, signal); }
+  webhookInfo() { return this.request<{ url: string }>("getWebhookInfo", {}, 8000); }
+  commands() { return this.request<boolean>("setMyCommands", { commands: [{ command: "start", description: "Меню подписки" }, { command: "owner", description: "Владелец: меню или первое подключение" }] }, 8000); }
+  answerCallback(id: string, signal?: AbortSignal) { return this.request<boolean>("answerCallbackQuery", { callback_query_id: id }, 5000, signal); }
+  send(chatId: string, text: string, timeout: number, signal?: AbortSignal, markup?: TelegramMarkup) {
+    return this.request<{ message_id: number }>("sendMessage", { chat_id: chatId, text, ...(markup ? { reply_markup: markup } : {}), link_preview_options: { is_disabled: true } }, timeout, signal)
       .then((r): TelegramResult<number> => r.ok ? (Number.isSafeInteger(r.value?.message_id) ? { ok: true, value: r.value.message_id } : uncertain()) : r);
   }
 }

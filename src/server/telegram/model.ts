@@ -8,7 +8,7 @@ export class TelegramModelError extends Error {
   readonly code: string;
   constructor(code: string) { super(code); this.code = code; this.name = "TelegramModelError"; }
 }
-export type TelegramState = { enabled: number; bot_id: string | null; bot_username: string | null; update_offset: number; worker_owner: string | null; worker_until: number; next_send_at: number };
+export type TelegramState = { enabled: number; bot_id: string | null; bot_username: string | null; update_offset: number; worker_owner: string | null; worker_until: number; next_send_at: number; owner_recipient_id: string | null; owner_epoch: number; worker_config: string | null; last_poll_at: number };
 export type Recipient = { id: string; display_name: string; telegram_user_id: string | null; chat_id: string | null; connection_status: "invited" | "connected" | "revoked"; active: number; created_at: number; updated_at: number };
 export function telegramState(db: Database.Database): TelegramState { return db.prepare("SELECT * FROM telegram_state WHERE id=1").get() as TelegramState; }
 export const digestToken = (value: string) => createHash("sha256").update(value).digest("hex");
@@ -73,7 +73,7 @@ export function acquireWorker(db: Database.Database, owner: string, now: number)
   return telegramTransaction(db, () => db.prepare("UPDATE telegram_state SET worker_owner=?,worker_until=? WHERE id=1 AND (worker_owner=? OR worker_until<=?)").run(owner, now + 60000, owner, now).changes === 1);
 }
 export function ownsWorker(db: Database.Database, owner: string, now: number) { const s = telegramState(db); return s.worker_owner === owner && s.worker_until > now; }
-export function acceptUpdates(db: Database.Database, owner: string, updates: TelegramUpdate[], now: number) {
+export function acceptUpdates(db: Database.Database, owner: string, updates: TelegramUpdate[], now: number, interaction?: (update: TelegramUpdate) => void) {
   if (!Array.isArray(updates) || updates.length > 50) throw new TelegramModelError("INVALID_UPDATE_RESPONSE");
   for (const update of updates) telegramTransaction(db, () => {
     if (!ownsWorker(db, owner, now)) throw new TelegramModelError("WORKER_LEASE_LOST");
@@ -97,6 +97,7 @@ export function acceptUpdates(db: Database.Database, owner: string, updates: Tel
         }
       }
     }
+    interaction?.(update);
     db.prepare("UPDATE telegram_state SET update_offset=? WHERE id=1").run(update.update_id + 1);
     db.prepare("DELETE FROM telegram_invite_limits WHERE window_at<?").run(now - 3600000);
   });

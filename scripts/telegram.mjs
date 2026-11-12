@@ -6,6 +6,7 @@ import { openDatabase, privateDirectory, privateFile } from "../src/server/datab
 import { TelegramAdministration } from "../src/server/telegram/admin.ts";
 import { createInvite, telegramState, TelegramModelError } from "../src/server/telegram/model.ts";
 import { loadTelegramConfiguration, telegramConfigPath } from "../src/server/telegram/config.ts";
+import { manageTelegram } from "../src/server/telegram/management.ts";
 import { expireTelegramJobs } from "../src/server/telegram/worker.ts";
 
 let db;
@@ -17,6 +18,15 @@ try {
     if (key === "--local-operator") options[key] = true;
     else { if (!args[i + 1] || args[i + 1].startsWith("--")) throw new Error(); options[key] = args[++i]; }
   }
+  if (command === "manage") {
+    if (options["--local-operator"] !== true) throw new Error();
+    const chunks=[]; let size=0; for await (const chunk of process.stdin) { size+=chunk.length; if(size>8192)throw new Error();chunks.push(chunk); }
+    const input=JSON.parse(Buffer.concat(chunks).toString("utf8"));
+    if (!input || typeof input!=="object" || Array.isArray(input) || !["plan","configure","bootstrap","diagnose"].includes(input.operation) || Object.keys(input).some(k=>!["operation","token","confirmation","expected"].includes(k)))throw new Error();
+    const settings=databaseSettings();privateFile(settings.path);db=openDatabase(settings);
+    const result=await manageTelegram(db,settings.path,input.operation,input);
+    console.log(JSON.stringify({status:"OK",...result}));
+  } else {
   if (!["status", "bootstrap-owner", "invite", "renew", "enable", "disable", "recipient-on", "recipient-off", "revoke", "test"].includes(command)) throw new Error();
   const settings = databaseSettings(); privateFile(settings.path); db = openDatabase(settings);
   // The local OS account owns the private DB/directory. The nologin service UID
@@ -51,8 +61,10 @@ try {
   else if (command === "recipient-on" || command === "recipient-off") { await admin.active(options["--recipient"], command === "recipient-on"); console.log("Telegram recipient setting saved"); }
   else if (command === "revoke") { await admin.revoke(options["--recipient"]); console.log("Telegram access revoked"); }
   else if (command === "test") console.log(JSON.stringify({ testJobId: await admin.test(options["--recipient"]) }));
+  }
 } catch (error) {
-  const safe=new Set(["OWNER_ALREADY_BOOTSTRAPPED","BOT_NOT_READY","RECIPIENT_NOT_FOUND","INVITATION_REQUIRED","RECIPIENT_OR_NOTIFICATIONS_DISABLED","AUTHORIZATION_REQUIRED","INVALID_RECIPIENT_NAME","TELEGRAM_STORAGE_UNAVAILABLE"]);
-  console.error("Telegram command failed: "+(error instanceof TelegramModelError && safe.has(error.code) ? error.code : "COMMAND_REJECTED"));process.exitCode=1;
+  const safe=new Set(["OWNER_ALREADY_BOOTSTRAPPED","BOT_NOT_READY","RECIPIENT_NOT_FOUND","INVITATION_REQUIRED","RECIPIENT_OR_NOTIFICATIONS_DISABLED","AUTHORIZATION_REQUIRED","INVALID_RECIPIENT_NAME","TELEGRAM_STORAGE_UNAVAILABLE","TOKEN_REQUIRED","AUTH_INVALID","CONCURRENT_POLLING","INVALID_BOT_RESPONSE","BOT_CHANGED_RELINK_REQUIRED","INSTANCE_MISMATCH","CONFIGURATION_PLAN_CHANGED","BOOTSTRAP_CONFIRMATION_INVALID","NETWORK_UNCERTAIN","TEMPORARY_FAILURE","RATE_LIMITED","WEBHOOK_CONFIGURED","WEBHOOK_STATE_UNCONFIRMED"]);
+  const code=error instanceof TelegramModelError && safe.has(error.code) ? error.code : "COMMAND_REJECTED";
+  if(process.argv[2]==="manage") console.log(JSON.stringify({status:"FAILED",code}));else console.error("Telegram command failed: "+code);process.exitCode=1;
 }
 finally { db?.close(); }

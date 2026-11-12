@@ -67,7 +67,7 @@ class FakeStore:
         self.assets.pop(release["tag_name"], None)
 
 
-def bundle(directory, day=1, nonce=None, telegram=False):
+def bundle(directory, day=1, nonce=None, telegram=False, telegram_version=1):
     source = directory / "data"
     source.mkdir(exist_ok=True)
     for name in ("photos", "settings"):
@@ -77,7 +77,9 @@ def bundle(directory, day=1, nonce=None, telegram=False):
     if telegram:
         # Isolated archive only; never installed or used for a network request.
         path = source / "settings/telegram-bot.json"
-        path.write_text(json.dumps({"version": 1, "token": "123456:" + "S" * 35}))
+        configuration = {"version": telegram_version, "token": "123456:" + "S" * 35}
+        if telegram_version == 2: configuration.update(botId="123456", instance="d" * 64, key="K" * 43)
+        path.write_text(json.dumps(configuration))
         os.chmod(path, 0o600)
     db = sqlite3.connect(source / "studio.sqlite")
     db.execute("CREATE TABLE IF NOT EXISTS fixture(value TEXT)")
@@ -196,6 +198,19 @@ class BackupTests(unittest.TestCase):
             db = sqlite3.connect(destination / "studio.sqlite")
             self.assertEqual(db.execute("PRAGMA integrity_check").fetchone()[0], "ok")
             db.close()
+
+    def test_encrypted_backup_preserves_v2_binding_and_signing_key(self):
+        with tempfile.TemporaryDirectory() as folder:
+            folder=Path(folder);source,manifest=bundle(folder,telegram=True,telegram_version=2)
+            cipher=folder/'private.gpg';backup.crypt(source,cipher,PHRASE)
+            self.assertNotIn(('K'*43).encode(),cipher.read_bytes())
+            store=FakeStore();receipt=backup.publish(store,cipher,manifest,'daily')
+            restored=folder/'restored.tar.gz';backup.retrieve(store,receipt['tag'],restored,PHRASE)
+            target=folder/'restore';target.mkdir();backup.validate_bundle(restored,target)
+            self.assertFalse((target/'.telegram-instance').exists())
+            self.assertEqual(json.loads((target/'settings/telegram-bot.json').read_text()),
+                json.loads((folder/'data/settings/telegram-bot.json').read_text()))
+            self.assertEqual((target/'settings/telegram-bot.json').stat().st_mode&0o777,0o600)
 
     def test_wrong_key_and_tampering_do_not_restore(self):
         with tempfile.TemporaryDirectory() as folder:

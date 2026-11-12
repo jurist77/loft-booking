@@ -232,7 +232,7 @@ it("preserves full records/history across restart and online backup/restore", as
 });
 it("upgrades 0001 without rewriting history, intervals or inventing old contacts/events", async () => {
   const previous = await legacyDatabase(); const history = db.prepare("SELECT * FROM schema_migrations").get();
-  expect(await migrate(db, migrations)).toEqual([2, 3]); expect(await migrate(db, migrations)).toEqual([]);
+  expect(await migrate(db, migrations)).toEqual([2, 3, 4]); expect(await migrate(db, migrations)).toEqual([]);
   expect(db.prepare("SELECT * FROM schema_migrations WHERE version=1").get()).toEqual(history);
   for (const row of previous) expect(db.prepare("SELECT * FROM bookings WHERE id=?").get(row.id)).toEqual({ ...row, resource_id: STUDIO_RESOURCE_ID, first_name: null, last_name: null, phone: null, created_at: null, updated_at: null });
   expect(events()).toEqual([]); expect(() => createBooking(db, input(), now)).toThrow("BOOKING_OVERLAP");
@@ -245,5 +245,5 @@ it("rolls back a failed schema rebuild without losing any 0001 rows", async () =
   expect(db.prepare("SELECT * FROM bookings ORDER BY id").all()).toEqual(previous);
   expect(db.prepare("SELECT count(*) AS n FROM schema_migrations").get()).toEqual({ n: 1 });
   expect(db.prepare("SELECT name FROM sqlite_schema WHERE name IN ('resources','booking_events','bookings_v1')").all()).toEqual([]);
-  expect(await migrate(db, migrations)).toEqual([2, 3]); assertIntegrity(db, true);
+  expect(await migrate(db, migrations)).toEqual([2, 3, 4]); assertIntegrity(db, true);
 });

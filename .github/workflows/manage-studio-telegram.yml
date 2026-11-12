@@ -1,0 +1,46 @@
+name: Manage Studio Telegram
+on:
+  workflow_dispatch:
+    inputs:
+      server_ip:
+        description: "Installed Studio VPS IPv4/IPv6; SSH root:22"
+        type: string
+        required: true
+      operation:
+        description: "Technical setup only; daily management is in Telegram"
+        type: choice
+        default: diagnose
+        options: [diagnose, configure, rotate-token, bootstrap-owner]
+      confirmation:
+        description: "Exact CONFIGURE STUDIO TELEGRAM / ROTATE STUDIO TELEGRAM TOKEN / INITIALIZE STUDIO TELEGRAM OWNER; empty for diagnose"
+        type: string
+        required: false
+permissions:
+  contents: read
+  actions: read
+  deployments: write
+concurrency:
+  group: studio-telegram-management
+  cancel-in-progress: false
+jobs:
+  manage:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - name: SSH password tooling on disposable runner only
+        run: |
+          if ! command -v sshpass >/dev/null; then
+            sudo apt-get -o Acquire::Retries=3 -o APT::Update::Error-Mode=any update -qq
+            sudo apt-get -o Acquire::Retries=3 install -y --no-install-recommends sshpass
+          fi
+      - name: Manage private Telegram configuration; never deploy Studio
+        env:
+          STUDIO_SSH_PASSWORD: ${{ secrets.STUDIO_SSH_PASSWORD }}
+          STUDIO_TELEGRAM_BOT_TOKEN: ${{ secrets.STUDIO_TELEGRAM_BOT_TOKEN }}
+          STUDIO_TELEGRAM_OWNER_CONFIRMATION: ${{ secrets.STUDIO_TELEGRAM_OWNER_CONFIRMATION }}
+          GH_TOKEN: ${{ github.token }}
+        run: PYTHONDONTWRITEBYTECODE=1 python3 scripts/telegram-management/workflow.py

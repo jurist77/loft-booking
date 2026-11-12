@@ -218,7 +218,7 @@ it("upgrades an old database without changing old SQL/history/bookings or creati
   for (const name of ["0001_foundation.sql", "0002_booking_model.sql"]) writeFileSync(join(old, name), readFileSync(join(migrations, name)));
   const legacyPath = join(folder, "legacy.sqlite"); const settings = databaseSettings({ APP_MODE: "server", SQLITE_PATH: legacyPath }); initializeDatabase(settings); db = openDatabase(settings);
   await migrate(db, old); book(); const saved = db.prepare("SELECT * FROM bookings").all(); const history = db.prepare("SELECT * FROM schema_migrations").all();
-  expect(await migrate(db, migrations)).toEqual([3]); expect(db.prepare("SELECT * FROM bookings").all()).toEqual(saved);
+  expect(await migrate(db, migrations)).toEqual([3, 4]); expect(db.prepare("SELECT * FROM bookings").all()).toEqual(saved);
   expect(db.prepare("SELECT * FROM schema_migrations WHERE version<3").all()).toEqual(history); expect(rows()).toEqual([]);
   expireTelegramJobs(db, at + 86400000);
 });
